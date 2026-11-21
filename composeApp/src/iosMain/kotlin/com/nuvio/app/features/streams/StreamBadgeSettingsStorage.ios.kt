@@ -11,6 +11,11 @@ import kotlinx.serialization.json.put
 import platform.Foundation.NSUserDefaults
 
 actual object StreamBadgeSettingsStorage {
+    actual fun loadOfflineMaxHeight(): Int? = NSUserDefaults.standardUserDefaults.objectForKey(ProfileScopedKey.of("offline_max_height"))?.let { NSUserDefaults.standardUserDefaults.integerForKey(ProfileScopedKey.of("offline_max_height")).toInt() }
+    actual fun saveOfflineMaxHeight(value: Int) { NSUserDefaults.standardUserDefaults.setInteger(value.toLong(), forKey = ProfileScopedKey.of("offline_max_height")) }
+    actual fun loadOfflineMaxSizeGb(): Int? = NSUserDefaults.standardUserDefaults.objectForKey(ProfileScopedKey.of("offline_max_size_gb"))?.let { NSUserDefaults.standardUserDefaults.integerForKey(ProfileScopedKey.of("offline_max_size_gb")).toInt() }
+    actual fun saveOfflineMaxSizeGb(value: Int) { NSUserDefaults.standardUserDefaults.setInteger(value.toLong(), forKey = ProfileScopedKey.of("offline_max_size_gb")) }
+
     private const val streamBadgeRulesKey = "stream_badge_rules"
     private const val showFileSizeBadgesKey = "show_file_size_badges"
     private const val showAddonLogoKey = "show_addon_logo"
