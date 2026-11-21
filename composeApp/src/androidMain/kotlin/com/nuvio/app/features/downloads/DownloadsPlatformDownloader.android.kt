@@ -37,6 +37,8 @@ internal actual object DownloadsPlatformDownloader {
     internal fun managedTransfers(): List<AndroidDownloadTransfer> =
         downloadScheduler?.store?.transfers?.value?.values?.toList().orEmpty()
 
+    actual fun pauseTransfer(destinationFileName: String) { downloadScheduler?.pause(destinationFileName) }
+
     actual fun restoreItem(item: DownloadItem): DownloadItem = downloadScheduler?.restore(item)
         ?: if (item.status == DownloadStatus.Downloading) item.copy(status = DownloadStatus.Paused) else item
 
@@ -57,6 +59,7 @@ internal actual object DownloadsPlatformDownloader {
                     val item = current.item
                     when (item.status) {
                         DownloadStatus.Downloading -> onProgress(item.downloadedBytes, item.totalBytes)
+                        DownloadStatus.Queued -> onPaused()
                         DownloadStatus.Completed -> onSuccess(checkNotNull(item.localFileUri), item.totalBytes)
                         DownloadStatus.Failed -> onFailure(item.errorMessage ?: "Download failed")
                         DownloadStatus.Paused -> onPaused()

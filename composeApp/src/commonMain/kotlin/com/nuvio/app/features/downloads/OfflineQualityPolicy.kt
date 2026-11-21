@@ -11,7 +11,8 @@ import com.nuvio.app.features.streams.StreamBadgeSettingsStorage
 internal object OfflineQualityPolicy {
     var maxHeight: Int = 1080
         private set
-    var maxSizeGb: Int = 4
+    /** 75, 150, 250 = 0.75, 1.50, 2.50 GiB per video hour. */
+    var sizePreset: Int = 150
         private set
 
     private var loaded = false
@@ -19,7 +20,7 @@ internal object OfflineQualityPolicy {
     fun ensureLoaded() {
         if (loaded) return
         maxHeight = StreamBadgeSettingsStorage.loadOfflineMaxHeight()?.takeIf { it == 720 || it == 1080 } ?: 1080
-        maxSizeGb = StreamBadgeSettingsStorage.loadOfflineMaxSizeGb()?.takeIf { it in listOf(2, 4, 8, 16, 0) } ?: 4
+        sizePreset = StreamBadgeSettingsStorage.loadOfflineMaxSizeGb()?.takeIf { it in listOf(75, 150, 250) } ?: 150
         loaded = true
     }
 
@@ -30,14 +31,21 @@ internal object OfflineQualityPolicy {
         StreamBadgeSettingsStorage.saveOfflineMaxHeight(value)
     }
 
-    fun setMaxSizeGb(value: Int) {
+    fun setSizePreset(value: Int) {
         ensureLoaded()
-        require(value in listOf(0, 2, 4, 8, 16))
-        maxSizeGb = value
+        require(value in listOf(75, 150, 250))
+        sizePreset = value
         StreamBadgeSettingsStorage.saveOfflineMaxSizeGb(value)
     }
 
-    fun rejectionReason(stream: StreamItem): String? {
+    /** Uses title runtime where known; conservative fallbacks are 45m TV and 120m movies. */
+    fun maxBytes(durationMinutes: Int?, isEpisode: Boolean): Long {
+        ensureLoaded()
+        val minutes = durationMinutes?.takeIf { it in 5..360 } ?: if (isEpisode) 45 else 120
+        return (sizePreset.toLong() * 1024 * 1024 * 1024 * minutes / 100L / 60L)
+    }
+
+    fun rejectionReason(stream: StreamItem, durationMinutes: Int? = null, isEpisode: Boolean = false): String? {
         ensureLoaded()
         val label = listOfNotNull(stream.name, stream.title, stream.description, stream.behaviorHints.filename).joinToString(" ").lowercase()
         if (Regex("""\b(remux|blu[ -]?ray\s*remux|2160p|4k|uhd|4320p|8k)\b""").containsMatchIn(label)) {
@@ -52,8 +60,8 @@ internal object OfflineQualityPolicy {
         if (detected == null) return "Download quality is unknown. Choose a stream labelled 720p or 1080p."
         if (detected > maxHeight) return "Only ${maxHeight}p or lower is permitted for offline downloads."
         val size = stream.behaviorHints.videoSize
-        if (maxSizeGb != 0 && size != null && size > maxSizeGb.toLong() * 1024 * 1024 * 1024) {
-            return "This file exceeds your ${maxSizeGb} GB download size limit."
+        if (size != null && size > maxBytes(durationMinutes, isEpisode)) {
+            return "This file exceeds your duration-adjusted download size limit."
         }
         return null
     }

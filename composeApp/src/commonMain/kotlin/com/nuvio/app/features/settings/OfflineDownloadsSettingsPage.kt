@@ -11,6 +11,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import com.nuvio.app.features.downloads.OfflineNetworkSettings
 import com.nuvio.app.features.downloads.OfflineWifiNetworkPicker
@@ -21,7 +25,7 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
     item(key = "offline-download-rules") {
         OfflineQualityPolicy.ensureLoaded()
         var resolution by remember { mutableIntStateOf(OfflineQualityPolicy.maxHeight) }
-        var sizeGb by remember { mutableIntStateOf(OfflineQualityPolicy.maxSizeGb) }
+        var sizePreset by remember { mutableIntStateOf(OfflineQualityPolicy.sizePreset) }
         OfflineNetworkSettings.ensureLoaded()
         SmartDownloadsRepository.ensureLoaded()
         var smartTarget by remember { mutableIntStateOf(SmartDownloadsRepository.state.value.target) }
@@ -46,12 +50,16 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                     },
                 )
                 SettingsNavigationRow(
-                    title = "Maximum size per file",
-                    description = if (sizeGb == 0) "Unlimited" else "$sizeGb GB",
+                    title = "Download size · per hour",
+                    description = when (sizePreset) {
+                        75 -> "Storage Saver · 0.75 GB/hour"
+                        250 -> "High Quality · 2.5 GB/hour"
+                        else -> "Balanced · 1.5 GB/hour (default)"
+                    } + " · tap to change",
                     isTablet = isTablet,
                     onClick = {
-                        sizeGb = when (sizeGb) { 2 -> 4; 4 -> 8; 8 -> 16; 16 -> 0; else -> 2 }
-                        OfflineQualityPolicy.setMaxSizeGb(sizeGb)
+                        sizePreset = when (sizePreset) { 75 -> 150; 150 -> 250; else -> 75 }
+                        OfflineQualityPolicy.setSizePreset(sizePreset)
                     },
                 )
                 SettingsNavigationRow(
@@ -70,6 +78,7 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                 )
             }
         }
+        Spacer(modifier = Modifier.height(24.dp))
         SettingsSection(title = "Smart Downloads · TV series", isTablet = isTablet) {
             SettingsGroup(isTablet = isTablet) {
                 SettingsNavigationRow(
@@ -91,9 +100,13 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                         SmartDownloadsRepository.setAutoDeleteWatched(it)
                     },
                 )
-                Text("Enable Smart Downloads for individual series from their detail pages. Downloads replenish while Nuvio Offline is running; transfers continue in the background.")
+                Text(
+                    "Enable Smart Downloads from each TV series page. Nuvio fills the next unwatched episodes while the app is running.",
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                )
             }
         }
+        Spacer(modifier = Modifier.height(24.dp))
         SettingsSection(title = "Download network restrictions", isTablet = isTablet) {
             SettingsGroup(isTablet = isTablet) {
                 SettingsSwitchRow(
@@ -106,21 +119,24 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                         OfflineNetworkSettings.setWifiOnly(it)
                     },
                 )
-                OfflineWifiNetworkPicker(onAdd = ::blockNetwork)
+                Spacer(modifier = Modifier.height(8.dp))
+                androidx.compose.foundation.layout.Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    OfflineWifiNetworkPicker(onAdd = ::blockNetwork)
+                }
                 OutlinedTextField(
                     value = networkName,
                     onValueChange = { networkName = it },
                     label = { Text("Wi-Fi name (SSID) to block") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 )
-                TextButton(enabled = networkName.isNotBlank(), onClick = { blockNetwork(networkName) }) {
+                TextButton(modifier = Modifier.padding(horizontal = 10.dp), enabled = networkName.isNotBlank(), onClick = { blockNetwork(networkName) }) {
                     Text("Add blocked network")
                 }
                 if (blocked.isEmpty()) {
-                    Text("No excluded Wi-Fi networks")
+                    Text("No excluded Wi-Fi networks", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
                 } else {
-                    Text("Excluded networks — tap to remove:")
+                    Text("Excluded networks — tap to remove:", modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
                     blocked.sorted().forEach { ssid ->
                         SettingsNavigationRow(
                             title = ssid,
@@ -133,7 +149,10 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                         )
                     }
                 }
-                Text("Allow location access and turn on Location to identify your Wi-Fi. If the name cannot be read, downloads stay blocked whenever exclusions exist.")
+                Text(
+                    "Precise Location must be enabled to identify Wi-Fi names. Unknown networks stay blocked when exclusions are set.",
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                )
             }
         }
     }

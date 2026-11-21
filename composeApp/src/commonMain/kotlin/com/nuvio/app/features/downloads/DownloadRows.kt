@@ -327,6 +327,18 @@ private fun activeStatusText(item: DownloadItem, speedBytesPerSecond: Long?): St
     } else {
         formatBytes(item.downloadedBytes)
     }
+    if (item.status == DownloadStatus.Queued) {
+        val position = DownloadsRepository.uiState.value.items.filter { it.status == DownloadStatus.Queued }
+            .sortedWith(compareBy<DownloadItem> { candidate ->
+                DownloadsRepository.uiState.value.items.filter { it.parentMetaId == candidate.parentMetaId }
+                    .minOfOrNull { it.createdAtEpochMs } ?: candidate.createdAtEpochMs
+            }.thenBy { it.seasonNumber ?: Int.MAX_VALUE }.thenBy { it.episodeNumber ?: Int.MAX_VALUE })
+            .indexOfFirst { it.id == item.id } + 1
+        return "Queued · Position #$position"
+    }
+    if (item.status == DownloadStatus.Downloading && item.downloadedBytes == 0L) {
+        OfflineWifiPlatform.restrictionLabel()?.let { return it }
+    }
     if (item.status == DownloadStatus.Paused) {
         return stringResource(Res.string.downloads_status_paused, transferred)
     }

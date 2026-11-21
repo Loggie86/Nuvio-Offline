@@ -124,11 +124,12 @@ object DownloadsRepository {
         episodeNumber: Int?,
         episodeTitle: String?,
         episodeThumbnail: String?,
+        durationMinutes: Int? = null,
         stream: StreamItem,
     ): DownloadEnqueueResult {
         ensureLoaded()
 
-        if (OfflineQualityPolicy.rejectionReason(stream) != null) {
+        if (OfflineQualityPolicy.rejectionReason(stream, durationMinutes, seasonNumber != null) != null) {
             return DownloadEnqueueResult.QualityRestricted
         }
 
@@ -184,6 +185,7 @@ object DownloadsRepository {
             episodeNumber = episodeNumber,
             episodeTitle = episodeTitle,
             episodeThumbnail = episodeThumbnail,
+            durationMinutes = durationMinutes,
             streamTitle = stream.streamLabel,
             streamSubtitle = stream.streamSubtitle,
             providerName = stream.addonName,
@@ -199,7 +201,7 @@ object DownloadsRepository {
             sourceSubtitles = stream.externalSubtitles,
             localFileUri = null,
             fileName = fileName,
-            status = DownloadStatus.Downloading,
+            status = DownloadStatus.Queued,
             downloadedBytes = 0L,
             totalBytes = null,
             errorMessage = null,
@@ -210,7 +212,7 @@ object DownloadsRepository {
         currentItems.add(0, item)
         publish(currentItems)
         persist()
-        startDownload(item)
+        startNextQueued()
 
         return if (replacedExisting) {
             DownloadEnqueueResult.Replaced
@@ -232,14 +234,19 @@ object DownloadsRepository {
                 errorMessage = null,
             )
         }
+        startNextQueued()
     }
 
     fun pauseActiveDownloads() {
         ensureLoaded()
-        _uiState.value.items
-            .filter { it.status == DownloadStatus.Downloading }
-            .map { it.id }
-            .forEach(::pauseDownload)
+        val paused = _uiState.value.items.filter { it.status == DownloadStatus.Downloading || it.status == DownloadStatus.Queued }
+        paused.forEach { item ->
+            activeHandles.remove(item.id)?.cancel()
+        }
+        publish(_uiState.value.items.map { item ->
+            if (paused.any { it.id == item.id }) item.copy(status = DownloadStatus.Paused) else item
+        })
+        persist()
     }
 
     fun resumePausedDownloads() {
@@ -253,10 +260,10 @@ object DownloadsRepository {
     fun resumeDownload(downloadId: String) {
         ensureLoaded()
         val item = _uiState.value.items.firstOrNull { it.id == downloadId } ?: return
-        if (item.status != DownloadStatus.Paused && item.status != DownloadStatus.Failed) return
+        if (item.status != DownloadStatus.Paused && item.status != DownloadStatus.Failed && item.status != DownloadStatus.Queued) return
 
         val reset = item.copy(
-            status = DownloadStatus.Downloading,
+            status = DownloadStatus.Queued,
             errorMessage = null,
             localFileUri = null,
             updatedAtEpochMs = DownloadsClock.nowEpochMs(),
@@ -264,7 +271,7 @@ object DownloadsRepository {
 
         replaceItem(reset)
         persist()
-        startDownload(reset)
+        startNextQueued()
     }
 
     fun retryDownload(downloadId: String) {
@@ -279,6 +286,7 @@ object DownloadsRepository {
         replaceItem(restored)
         persist()
         if (restored.status == DownloadStatus.Downloading) startDownload(restored)
+        else startNextQueued()
     }
 
     fun cancelDownload(downloadId: String) {
@@ -291,6 +299,7 @@ object DownloadsRepository {
 
         publish(_uiState.value.items.filterNot { it.id == downloadId })
         persist()
+        startNextQueued()
     }
 
     private fun loadFromDisk() {
@@ -315,13 +324,35 @@ object DownloadsRepository {
                 localUriNormalized
             }
 
-        _uiState.value = DownloadsUiState(normalized)
+        // Older builds started every transfer immediately. Pause excess Android jobs,
+        // retaining their partial files, before migrating to the ordered queue.
+        val oldActive = normalized.filter { it.status == DownloadStatus.Downloading }
+        val allowedActive = oldActive.minWithOrNull(downloadQueueComparator)
+        oldActive.filterNot { it.id == allowedActive?.id }.forEach {
+            DownloadsPlatformDownloader.pauseTransfer(it.fileName)
+        }
+        val sequenced = normalized.map { item ->
+            if (item.status == DownloadStatus.Downloading && item.id != allowedActive?.id) item.copy(status = DownloadStatus.Queued)
+            else item
+        }
+        _uiState.value = DownloadsUiState(sequenced)
         notifyLiveStatusPlatform()
         if (shouldPersistNormalized) {
             persist()
         }
-        normalized.filter { it.status == DownloadStatus.Downloading && it.id !in activeHandles }
+        sequenced.filter { it.status == DownloadStatus.Downloading && it.id !in activeHandles }
             .forEach(::startDownload)
+        startNextQueued()
+    }
+
+    private fun startNextQueued() {
+        if (_uiState.value.items.any { it.status == DownloadStatus.Downloading }) return
+        val next = _uiState.value.items.filter { it.status == DownloadStatus.Queued }
+            .minWithOrNull(downloadQueueComparator) ?: return
+        val active = next.copy(status = DownloadStatus.Downloading, updatedAtEpochMs = DownloadsClock.nowEpochMs())
+        replaceItem(active)
+        persist()
+        startDownload(active)
     }
 
     private fun startDownload(item: DownloadItem) {
@@ -360,6 +391,7 @@ object DownloadsRepository {
                         updatedAtEpochMs = DownloadsClock.nowEpochMs(),
                     )
                 }
+                startNextQueued()
             },
             onFailure = { message ->
                 activeHandles.remove(item.id)
@@ -374,6 +406,7 @@ object DownloadsRepository {
                         )
                     }
                 }
+                startNextQueued()
             },
             onPaused = {
                 activeHandles.remove(item.id)
@@ -381,6 +414,7 @@ object DownloadsRepository {
                     if (current.status != DownloadStatus.Downloading) return@mutateItem current
                     current.copy(status = DownloadStatus.Paused, errorMessage = null)
                 }
+                startNextQueued()
             },
         )
 
@@ -590,3 +624,13 @@ private fun String.isSupportedDownloadUrl(): Boolean {
     if (normalized.endsWith(".torrent") || normalized.contains(".torrent?")) return false
     return normalized.startsWith("http://") || normalized.startsWith("https://")
 }
+
+private val downloadQueueComparator: Comparator<DownloadItem> =
+    compareBy<DownloadItem> { candidate ->
+        // An earlier-followed show remains ahead of newer shows; manual movies use their own timestamp.
+        DownloadsRepository.uiState.value.items.filter { it.parentMetaId == candidate.parentMetaId }
+            .minOfOrNull { it.createdAtEpochMs } ?: candidate.createdAtEpochMs
+    }.thenBy { it.seasonNumber ?: Int.MAX_VALUE }
+        .thenBy { it.episodeNumber ?: Int.MAX_VALUE }
+        .thenBy { it.createdAtEpochMs }
+        .thenBy { it.id }

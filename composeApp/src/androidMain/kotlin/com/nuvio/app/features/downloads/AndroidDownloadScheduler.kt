@@ -186,10 +186,16 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 validator = transfer.validator,
                 client = client,
                 onHeaders = { total, validator ->
+                    if (total != null && total > OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode)) {
+                        throw IOException("File exceeds the duration-based download size limit")
+                    }
                     updateActive(transfer) { it.copy(validator = validator, item = it.item.copy(totalBytes = total)) }
                 },
                 networkCheck = { OfflineWifiPlatform.requireAllowed(context, network) },
                 onProgress = { bytes, total ->
+                    if (bytes > OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode)) {
+                        throw IOException("Download exceeded the duration-based size limit")
+                    }
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastProgressAt >= 1_000L || bytes == total) {
                         lastProgressAt = now

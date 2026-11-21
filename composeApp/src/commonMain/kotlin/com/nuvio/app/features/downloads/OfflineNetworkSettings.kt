@@ -47,5 +47,6 @@ internal object OfflineNetworkSettings {
 
 internal expect object OfflineWifiPlatform {
     fun currentSsid(): String?
+    fun restrictionLabel(): String?
     fun onRulesChanged()
 }

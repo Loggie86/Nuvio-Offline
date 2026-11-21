@@ -152,6 +152,7 @@ internal actual object DownloadsLiveStatusPlatform {
             }
 
             DownloadStatus.Paused,
+            DownloadStatus.Queued,
             DownloadStatus.Failed,
             DownloadStatus.Completed,
             -> {
@@ -195,6 +196,7 @@ internal actual object DownloadsLiveStatusPlatform {
                 }
             }
 
+            DownloadStatus.Queued -> "Queued · $detail"
             DownloadStatus.Paused -> runBlocking { getString(Res.string.downloads_live_paused, detail) }
             DownloadStatus.Failed -> item.errorMessage?.takeIf { it.isNotBlank() } ?: runBlocking { getString(Res.string.downloads_live_failed) }
             DownloadStatus.Completed -> runBlocking { getString(Res.string.downloads_live_completed) }

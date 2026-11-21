@@ -486,7 +486,7 @@ private fun List<DownloadItem>.downloadedEntries(): List<DownloadedEntry> {
 private fun DownloadItem.toggleTransfer() {
     when (status) {
         DownloadStatus.Downloading -> DownloadsRepository.pauseDownload(id)
-        DownloadStatus.Paused -> DownloadsRepository.resumeDownload(id)
+        DownloadStatus.Paused, DownloadStatus.Queued -> DownloadsRepository.resumeDownload(id)
         DownloadStatus.Failed -> DownloadsRepository.retryDownload(id)
         DownloadStatus.Completed -> Unit
     }

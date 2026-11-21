@@ -31,6 +31,7 @@ internal data class SmartEpisode(
     val episode: Int,
     val title: String,
     val thumbnail: String? = null,
+    val runtimeMinutes: Int? = null,
 )
 
 @Serializable
@@ -59,6 +60,7 @@ internal object SmartDownloadsRepository {
     val state: StateFlow<SmartDownloadState> = mutable.asStateFlow()
     private var loaded = false
     private var observing = false
+    private val lastUnsuccessfulAttempt = mutableMapOf<String, Long>()
 
     fun ensureLoaded() {
         if (loaded) return
@@ -101,7 +103,7 @@ internal object SmartDownloadsRepository {
             save(mutable.value.copy(followed = existing.filterNot { it.id == meta.id }))
         } else {
             val episodes = meta.releasedPlayableEpisodes(CurrentDateProvider.todayIsoDate()).filter { it.season != null && it.episode != null && it.available && (it.season ?: 0) > 0 }
-                .map { SmartEpisode(it.id, it.season!!, it.episode!!, it.title, it.thumbnail) }
+                .map { SmartEpisode(it.id, it.season!!, it.episode!!, it.title, it.thumbnail, it.runtime) }
                 .sortedWith(compareBy({ it.season }, { it.episode }))
             save(mutable.value.copy(followed = existing + SmartSeries(
                 meta.id, meta.name, meta.poster, meta.logo, meta.background, episodes,
@@ -113,7 +115,7 @@ internal object SmartDownloadsRepository {
         ensureLoaded()
         if (!isFollowing(meta.id)) return
         val episodes = meta.releasedPlayableEpisodes(CurrentDateProvider.todayIsoDate()).filter { it.season != null && it.episode != null && it.available && (it.season ?: 0) > 0 }
-            .map { SmartEpisode(it.id, it.season!!, it.episode!!, it.title, it.thumbnail) }
+            .map { SmartEpisode(it.id, it.season!!, it.episode!!, it.title, it.thumbnail, it.runtime) }
             .sortedWith(compareBy({ it.season }, { it.episode }))
         val revised = mutable.value.followed.map { series ->
             if (series.id == meta.id) series.copy(episodes = episodes, name = meta.name,
@@ -160,16 +162,29 @@ internal object SmartDownloadsRepository {
                     series.episodes.any { ep -> ep.season == it.seasonNumber && ep.episode == it.episodeNumber && isWatched(series, ep) } }
                     .forEach { DownloadsRepository.cancelDownload(it.id) }
             }
-            val current = DownloadsRepository.uiState.value.items.filter { it.parentMetaId == series.id && it.status != DownloadStatus.Failed }
             val upcoming = series.episodes.filterNot { isWatched(series, it) }.take(settings.target)
-            val missing = upcoming.firstOrNull { ep -> current.none { it.seasonNumber == ep.season && it.episodeNumber == ep.episode } }
-            if (missing != null) {
-                OfflineAutoDownload.enqueue(
-                    type = "series", videoId = missing.id, parentMetaId = series.id, parentMetaType = "series",
+            // Fill the requested target now; don't depend on another show being added
+            // to trigger the next episode. Failed searches use a cooldown to prevent loops.
+            for (episode in upcoming) {
+                val existing = DownloadsRepository.uiState.value.items.any { item ->
+                    item.parentMetaId == series.id && item.seasonNumber == episode.season &&
+                        item.episodeNumber == episode.episode && item.status != DownloadStatus.Failed
+                }
+                if (existing) continue
+                val key = "${series.id}|${episode.season}|${episode.episode}"
+                val now = DownloadsClock.nowEpochMs()
+                if (now - (lastUnsuccessfulAttempt[key] ?: 0L) < 10 * 60 * 1000L) continue
+                val result = OfflineAutoDownload.enqueue(
+                    type = "series", videoId = episode.id, parentMetaId = series.id, parentMetaType = "series",
                     title = series.name, logo = series.logo, poster = series.poster, background = series.background,
-                    season = missing.season, episode = missing.episode, episodeTitle = missing.title,
-                    episodeThumbnail = missing.thumbnail,
+                    season = episode.season, episode = episode.episode, episodeTitle = episode.title,
+                    episodeThumbnail = episode.thumbnail, durationMinutes = episode.runtimeMinutes,
                 )
+                val queued = DownloadsRepository.uiState.value.items.any { item ->
+                    item.parentMetaId == series.id && item.seasonNumber == episode.season &&
+                        item.episodeNumber == episode.episode && item.status != DownloadStatus.Failed
+                }
+                if (!queued) lastUnsuccessfulAttempt[key] = now else lastUnsuccessfulAttempt.remove(key)
             }
         }
     }

@@ -19,6 +19,7 @@ internal object OfflineAutoDownload {
         episode: Int?,
         episodeTitle: String?,
         episodeThumbnail: String?,
+        durationMinutes: Int? = null,
     ): String {
         OfflineQualityPolicy.ensureLoaded()
         StreamsRepository.load(type, videoId, parentMetaId, season, episode, manualSelection = true)
@@ -31,7 +32,7 @@ internal object OfflineAutoDownload {
         } ?: return "Stream search timed out. Try again."
 
         val candidates = loaded.allStreams.filter { stream ->
-            stream.playableDirectUrl != null && OfflineQualityPolicy.rejectionReason(stream) == null
+            stream.playableDirectUrl != null && OfflineQualityPolicy.rejectionReason(stream, durationMinutes, season != null) == null
         }
         val preferred = candidates.minWithOrNull(
             compareBy<com.nuvio.app.features.streams.StreamItem> { stream ->
@@ -45,7 +46,7 @@ internal object OfflineAutoDownload {
             parentMetaType = parentMetaType, title = title, logo = logo,
             poster = poster, background = background, seasonNumber = season,
             episodeNumber = episode, episodeTitle = episodeTitle,
-            episodeThumbnail = episodeThumbnail, stream = preferred,
+            episodeThumbnail = episodeThumbnail, durationMinutes = durationMinutes, stream = preferred,
         )
         return result.toastMessage()
     }

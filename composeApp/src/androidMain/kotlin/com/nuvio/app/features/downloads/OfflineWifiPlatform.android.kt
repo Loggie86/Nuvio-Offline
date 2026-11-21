@@ -20,6 +20,21 @@ internal actual object OfflineWifiPlatform {
     fun initialize(context: Context) { appContext = context.applicationContext }
 
     actual fun currentSsid(): String? = appContext?.let(::connectedSsid)
+    actual fun restrictionLabel(): String? {
+        val context = appContext ?: return null
+        OfflineNetworkSettings.ensureLoaded()
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork)
+        val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        if (!wifi) return if (OfflineNetworkSettings.wifiOnly) "Waiting for Wi-Fi" else null
+        val ssid = connectedSsid(context)
+        if (OfflineNetworkSettings.excludedSsids.isNotEmpty() && ssid == null) return "Waiting for allowed Wi-Fi"
+        if (ssid != null && OfflineNetworkSettings.excludedSsids.any { it.equals(ssid, ignoreCase = true) }) {
+            return "Blocked Wi-Fi: $ssid"
+        }
+        return null
+    }
+
     actual fun onRulesChanged() {
         appContext?.let { DownloadsPlatformDownloader.refreshNetworkRules() }
     }

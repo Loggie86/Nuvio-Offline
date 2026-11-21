@@ -90,7 +90,7 @@ internal fun DownloadActionSheet(
                     title = stringResource(Res.string.compose_action_pause),
                     onClick = { dismissAfter(onToggleTransfer) },
                 )
-                DownloadStatus.Paused -> NuvioBottomSheetActionRow(
+                DownloadStatus.Paused, DownloadStatus.Queued -> NuvioBottomSheetActionRow(
                     icon = Icons.Rounded.Download,
                     title = stringResource(Res.string.action_resume),
                     onClick = { dismissAfter(onToggleTransfer) },

@@ -147,6 +147,8 @@ internal actual object DownloadsPlatformDownloader {
         return handle
     }
 
+    actual fun pauseTransfer(destinationFileName: String) = Unit
+
     actual fun restoreItem(item: DownloadItem): DownloadItem =
         if (item.status == DownloadStatus.Downloading) {
             item.copy(status = DownloadStatus.Paused, errorMessage = null)

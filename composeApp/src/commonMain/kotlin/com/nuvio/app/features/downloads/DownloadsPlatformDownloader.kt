@@ -22,6 +22,7 @@ internal expect object DownloadsPlatformDownloader {
     ): DownloadsTaskHandle
 
     fun restoreItem(item: DownloadItem): DownloadItem
+    fun pauseTransfer(destinationFileName: String)
 
     fun removeFile(localFileUri: String?): Boolean
 

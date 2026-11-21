@@ -894,6 +894,7 @@ fun MetaDetailsScreen(
                             episode = episode?.episodeNumber,
                             episodeTitle = episode?.episodeTitle,
                             episodeThumbnail = episode?.episodeThumbnail,
+                            durationMinutes = if (episode != null) meta.videos.firstOrNull { it.season == episode.seasonNumber && it.episode == episode.episodeNumber }?.runtime else meta.runtime?.filter { it.isDigit() }?.toIntOrNull(),
                         )
                         NuvioToastController.show(result)
                     }
