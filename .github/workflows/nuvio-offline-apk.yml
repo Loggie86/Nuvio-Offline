@@ -38,9 +38,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Prepare local Android configuration
         env:
-          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
-          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
-          NUVIO_SUPABASE_FALLBACK_URL: ${{ secrets.NUVIO_SUPABASE_FALLBACK_URL }}
+          NUVIO_SUPABASE_URL: https://api.nuvio.tv
+          NUVIO_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI
+          NUVIO_SUPABASE_FALLBACK_URL: https://api-two.nuvioapp.space
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: |
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
