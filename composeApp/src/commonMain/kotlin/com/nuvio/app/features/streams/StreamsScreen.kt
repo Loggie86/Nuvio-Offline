@@ -71,6 +71,7 @@ import com.nuvio.app.core.ui.backdropControlColor
 import com.nuvio.app.core.ui.dismissNuvioBottomSheet
 import com.nuvio.app.core.ui.featherArtwork
 import com.nuvio.app.core.ui.rememberArtworkBackdrop
+import com.nuvio.app.features.downloads.OfflineQualityPolicy
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.details.MetaScreenSettingsRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -975,6 +976,8 @@ private fun StreamActionsSheet(
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
+    var maxDownloadHeight by remember { mutableStateOf(OfflineQualityPolicy.apply { ensureLoaded() }.maxHeight) }
+    var maxDownloadSizeGb by remember { mutableStateOf(OfflineQualityPolicy.maxSizeGb) }
 
     NuvioModalBottomSheet(
         onDismissRequest = {
@@ -1043,13 +1046,53 @@ private fun StreamActionsSheet(
                     }
                 },
             )
+            NuvioBottomSheetDivider()
+            Text(
+                text = "Nuvio Offline • Download restrictions",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            NuvioBottomSheetActionRow(
+                icon = Icons.Rounded.Download,
+                title = "Maximum quality: ${maxDownloadHeight}p (tap to change)",
+                onClick = {
+                    maxDownloadHeight = if (maxDownloadHeight == 1080) 720 else 1080
+                    OfflineQualityPolicy.setMaxHeight(maxDownloadHeight)
+                },
+            )
+            NuvioBottomSheetActionRow(
+                icon = Icons.Rounded.Download,
+                title = "Maximum file size: ${if (maxDownloadSizeGb == 0) "Unlimited" else "${maxDownloadSizeGb} GB"} (tap to change)",
+                onClick = {
+                    maxDownloadSizeGb = when (maxDownloadSizeGb) {
+                        2 -> 4
+                        4 -> 8
+                        8 -> 16
+                        16 -> 0
+                        else -> 2
+                    }
+                    OfflineQualityPolicy.setMaxSizeGb(maxDownloadSizeGb)
+                },
+            )
+            Text(
+                text = "4K, UHD and remux files are always excluded. Unlabelled quality is rejected.",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             NuvioBottomSheetActionRow(
                 icon = Icons.Rounded.Download,
                 title = stringResource(Res.string.streams_download_file),
                 onClick = {
-                    onDownload(stream)
-                    coroutineScope.launch {
-                        dismissNuvioBottomSheet(sheetState = sheetState, onDismiss = onDismiss)
+                    val rejected = OfflineQualityPolicy.rejectionReason(stream)
+                    if (rejected != null) {
+                        NuvioToastController.show(rejected)
+                    } else {
+                        onDownload(stream)
+                        coroutineScope.launch {
+                            dismissNuvioBottomSheet(sheetState = sheetState, onDismiss = onDismiss)
+                        }
                     }
                 },
             )
