@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -257,6 +258,7 @@ fun DetailActions(
     onWatchedClick: () -> Unit,
     onSaveClick: () -> Unit,
     onSaveLongClick: (() -> Unit)?,
+    onDownloadClick: (() -> Unit)? = null,
 ) {
     val shuffleAction = onShuffleClick?.let { onClick ->
         DetailSecondaryAction(
@@ -272,6 +274,13 @@ fun DetailActions(
         pinnedAction = shuffleAction?.takeIf { shuffleEnabled },
         secondaryActions = buildList {
             if (!shuffleEnabled) shuffleAction?.let(::add)
+            if (onDownloadClick != null) add(
+                DetailSecondaryAction(
+                    label = "Download best offline version",
+                    icon = Icons.Default.Download,
+                    onClick = onDownloadClick,
+                ),
+            )
             add(
                 DetailSecondaryAction(
                     label = stringResource(if (isWatched) Res.string.hero_mark_unwatched else Res.string.hero_mark_watched),

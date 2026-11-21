@@ -134,6 +134,7 @@ import com.nuvio.app.features.library.TrackingMembershipRemovalConfirmationHost
 import com.nuvio.app.features.library.executeTrackingMembershipOperation
 import com.nuvio.app.features.library.showTrackingMembershipRewriteFeedback
 import com.nuvio.app.features.library.toLibraryItem
+import com.nuvio.app.features.downloads.OfflineAutoDownload
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.shuffle.EpisodeShuffleRepository
 import com.nuvio.app.features.shuffle.EpisodeShuffleSheet
@@ -869,6 +870,26 @@ fun MetaDetailsScreen(
                         }
                     }
                 }
+                val onPrimaryDownloadClick: () -> Unit = {
+                    detailsScope.launch {
+                        val episode = if (meta.type == "series" || hasEpisodes) seriesAction else null
+                        val result = OfflineAutoDownload.enqueue(
+                            type = meta.type,
+                            videoId = if (episode == null) meta.id else seriesStreamVideoId ?: episode.videoId,
+                            parentMetaId = meta.id,
+                            parentMetaType = meta.type,
+                            title = meta.name,
+                            logo = meta.logo,
+                            poster = meta.poster,
+                            background = meta.background,
+                            season = episode?.seasonNumber,
+                            episode = episode?.episodeNumber,
+                            episodeTitle = episode?.episodeTitle,
+                            episodeThumbnail = episode?.episodeThumbnail,
+                        )
+                        NuvioToastController.show(result)
+                    }
+                }
                 val manualPlayHandler = onPlayManually
                 val showManualPlayOption = manualPlayHandler != null && StreamAutoPlayPolicy.isEffectivelyEnabled(playerSettingsUiState)
                 val onPrimaryPlayLongClick: (() -> Unit)? = manualPlayHandler
@@ -1192,6 +1213,8 @@ fun MetaDetailsScreen(
                                                             isTablet = true,
                                                             shuffleEnabled = shuffleSettings.enabled,
                                                             onPlayClick = onPrimaryPlayClick,
+                    onDownloadClick = onPrimaryDownloadClick,
+                                                            onDownloadClick = onPrimaryDownloadClick,
                                                             onPlayLongClick = if (showManualPlayOption) onPrimaryPlayLongClick else null,
                                                             onShuffleClick = onShuffleClick,
                                                             onWatchedClick = toggleWatched,
@@ -1245,6 +1268,8 @@ fun MetaDetailsScreen(
                                         isSaved = isSaved,
                                         isWatched = isWatched,
                                         onPrimaryPlayClick = onPrimaryPlayClick,
+                    onPrimaryDownloadClick = onPrimaryDownloadClick,
+                                        onPrimaryDownloadClick = onPrimaryDownloadClick,
                                         onShuffleClick = onShuffleClick,
                                         shuffleEnabled = shuffleSettings.enabled,
                                         onPrimaryPlayLongClick = onPrimaryPlayLongClick,
@@ -1984,6 +2009,7 @@ private fun LazyListScope.configuredMetaSectionItems(
     isSaved: Boolean,
     isWatched: Boolean,
     onPrimaryPlayClick: () -> Unit,
+    onPrimaryDownloadClick: () -> Unit,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,
@@ -2298,6 +2324,7 @@ private fun ConfiguredMetaSections(
     isSaved: Boolean,
     isWatched: Boolean,
     onPrimaryPlayClick: () -> Unit,
+    onPrimaryDownloadClick: () -> Unit,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,

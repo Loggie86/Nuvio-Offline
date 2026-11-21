@@ -77,6 +77,13 @@ internal fun LazyListScope.settingsRootContent(
                             isTablet = isTablet,
                             onPageClick = onPageClick,
                         )
+                        SettingsGroupDivider(isTablet = isTablet)
+                        SettingsNavigationRow(
+                            title = "Downloads",
+                            description = "Offline quality, 4K exclusion and file-size limits",
+                            isTablet = isTablet,
+                            onClick = { onPageClick(SettingsPage.Downloads) },
+                        )
                     }
                     SettingsCategory.Services -> {
                         SettingsPageRow(

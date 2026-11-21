@@ -39,7 +39,7 @@ internal object OfflineQualityPolicy {
 
     fun rejectionReason(stream: StreamItem): String? {
         ensureLoaded()
-        val label = listOfNotNull(stream.name, stream.title, stream.description).joinToString(" ").lowercase()
+        val label = listOfNotNull(stream.name, stream.title, stream.description, stream.behaviorHints.filename).joinToString(" ").lowercase()
         if (Regex("""\b(remux|blu[ -]?ray\s*remux|2160p|4k|uhd|4320p|8k)\b""").containsMatchIn(label)) {
             return "4K, UHD and remux files are excluded from offline downloads."
         }

@@ -141,6 +141,11 @@ internal enum class SettingsPage(
         category = SettingsCategory.Look,
         parentPage = Root,
     ),
+    Downloads(
+        titleRes = Res.string.compose_settings_root_downloads_title,
+        category = SettingsCategory.Watch,
+        parentPage = Root,
+    ),
     Streams(
         titleRes = Res.string.compose_settings_page_streams,
         category = SettingsCategory.Look,
@@ -250,6 +255,7 @@ internal val SettingsPage.icon: ImageVector
         SettingsPage.Appearance -> Icons.Default.Palette
         SettingsPage.Layout -> Icons.Default.GridView
         SettingsPage.About -> Icons.Default.Info
+        SettingsPage.Downloads -> Icons.Default.QueuePlayNext
         SettingsPage.Streams -> Icons.AutoMirrored.Filled.ViewList
         SettingsPage.Advanced -> Icons.Default.Build
         SettingsPage.Notifications -> Icons.Rounded.Notifications
