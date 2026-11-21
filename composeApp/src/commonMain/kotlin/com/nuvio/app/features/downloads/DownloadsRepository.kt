@@ -127,6 +127,10 @@ object DownloadsRepository {
     ): DownloadEnqueueResult {
         ensureLoaded()
 
+        if (OfflineQualityPolicy.rejectionReason(stream) != null) {
+            return DownloadEnqueueResult.QualityRestricted
+        }
+
         val sourceUrl = stream.playableDirectUrl
             ?.trim()
             ?.takeIf { it.isNotBlank() }
