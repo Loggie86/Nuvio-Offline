@@ -368,14 +368,37 @@ object MetaDetailsRepository {
             ?: itemId
     }
 
-    private suspend fun tryFetchTmdbFallbackMeta(type: String, id: String): MetaDetails? =
-        withTimeoutOrNull(TMDB_ENRICH_TIMEOUT_MS) {
+    /** IMDb IDs from synced playback history need a metadata source after a clean install.
+     * TMDB standalone currently accepts only tmdb: IDs, so use public Cinemeta for tt IDs.
+     * This fallback is metadata-only and does not install or change user add-ons.
+     */
+    private suspend fun tryFetchTmdbFallbackMeta(type: String, id: String): MetaDetails? {
+        val tmdb = withTimeoutOrNull(TMDB_ENRICH_TIMEOUT_MS) {
             TmdbMetadataService.fetchStandaloneMeta(
                 type = type,
                 id = id,
                 settings = TmdbSettingsRepository.snapshot(),
             )
         }
+        if (tmdb != null) return tmdb
+        if (!Regex("tt[0-9]{6,12}").matches(id)) return null
+        val mediaType = when (type.lowercase()) {
+            "series", "show", "tv", "tvshow", "anime" -> "series"
+            "movie", "film" -> "movie"
+            else -> return null
+        }
+        return withTimeoutOrNull(FETCH_TIMEOUT_MS) {
+            try {
+                val payload = fetchAddonResponseText("https://v3-cinemeta.strem.io/meta/$mediaType/$id.json")
+                MetaDetailsParser.parse(payload).takeIf { it.name.isNotBlank() && it.name != id }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                log.w { "IMDb metadata fallback failed: $mediaType/$id: ${error.message}" }
+                null
+            }
+        }
+    }
 
     private suspend fun publishLoadedMeta(
         requestKey: String,
