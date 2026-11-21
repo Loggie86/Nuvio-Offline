@@ -977,7 +977,7 @@ private fun StreamActionsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
     var maxDownloadHeight by remember { mutableStateOf(OfflineQualityPolicy.apply { ensureLoaded() }.maxHeight) }
-    var maxDownloadSizeGb by remember { mutableStateOf(OfflineQualityPolicy.maxSizeGb) }
+    var sizePreset by remember { mutableStateOf(OfflineQualityPolicy.sizePreset) }
 
     NuvioModalBottomSheet(
         onDismissRequest = {
@@ -1063,16 +1063,10 @@ private fun StreamActionsSheet(
             )
             NuvioBottomSheetActionRow(
                 icon = Icons.Rounded.Download,
-                title = "Maximum file size: ${if (maxDownloadSizeGb == 0) "Unlimited" else "${maxDownloadSizeGb} GB"} (tap to change)",
+                title = "Download size: ${when (sizePreset) { 75 -> "Storage Saver · 0.75 GB/h"; 250 -> "High Quality · 2.5 GB/h"; else -> "Balanced · 1.5 GB/h" }} (tap to change)",
                 onClick = {
-                    maxDownloadSizeGb = when (maxDownloadSizeGb) {
-                        2 -> 4
-                        4 -> 8
-                        8 -> 16
-                        16 -> 0
-                        else -> 2
-                    }
-                    OfflineQualityPolicy.setMaxSizeGb(maxDownloadSizeGb)
+                    sizePreset = when (sizePreset) { 75 -> 150; 150 -> 250; else -> 75 }
+                    OfflineQualityPolicy.setSizePreset(sizePreset)
                 },
             )
             Text(
