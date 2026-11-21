@@ -77,7 +77,13 @@ jobs:
           keytool -list -v -keystore "$HOME/.android/debug.keystore" \
             -storepass android -alias androiddebugkey | grep 'SHA256:' >> "$GITHUB_STEP_SUMMARY"
       - name: Build installable Android APK
-        run: ./gradlew :androidApp:assembleFullDebug --no-daemon --stacktrace
+        env:
+          NUVIO_OFFLINE_DEBUG_KEYSTORE: ${{ runner.home }}/.android/debug.keystore
+        run: |
+          echo 'CI keystore certificate:'
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep 'SHA256:'
+          ./gradlew :androidApp:assembleFullDebug --no-daemon --stacktrace
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --print-certs androidApp/build/outputs/apk/full/debug/*.apk | grep 'Signer #1 certificate SHA-256 digest'
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
