@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -268,20 +271,15 @@ fun DetailActions(
             onClick = onClick,
         )
     }
-    val downloadAction = onDownloadClick?.let { click ->
-        DetailSecondaryAction(
-            label = "Download best offline version",
-            icon = Icons.Default.Download,
-            onClick = click,
-        )
-    }
+    // Keep the offline action on its own row: the compact icon strip can
+    // collapse/hide actions on phones, especially in expanded action layouts.
+    Column {
     DetailActionButtons(
         playLabel = if (playEnabled) playLabel else stringResource(Res.string.playback_unavailable),
         playEnabled = playEnabled,
-        pinnedAction = shuffleAction?.takeIf { shuffleEnabled } ?: downloadAction,
+        pinnedAction = shuffleAction?.takeIf { shuffleEnabled },
         secondaryActions = buildList {
             if (!shuffleEnabled) shuffleAction?.let(::add)
-            if (shuffleEnabled) downloadAction?.let(::add)
             add(
                 DetailSecondaryAction(
                     label = stringResource(if (isWatched) Res.string.hero_mark_unwatched else Res.string.hero_mark_watched),
@@ -304,6 +302,17 @@ fun DetailActions(
         onPlayClick = onPlayClick,
         onPlayLongClick = onPlayLongClick,
     )
+    if (onDownloadClick != null) {
+        OutlinedButton(
+            onClick = onDownloadClick,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        ) {
+            Icon(imageVector = Icons.Default.Download, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Download offline · Auto-select")
+        }
+    }
+    }
 }
 
 @Composable
