@@ -18,7 +18,7 @@
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher"
         android:largeHeap="true"
-        android:label="@string/app_name"
+        android:label="Nuvio Offline"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -100,7 +100,7 @@
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash">
             <intent-filter>
@@ -115,7 +115,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_arctic_blue"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash.ArcticBlue">
             <intent-filter>
@@ -130,7 +130,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_emerald"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash.Emerald">
             <intent-filter>
@@ -145,7 +145,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_rose_gold"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash.RoseGold">
             <intent-filter>
@@ -160,7 +160,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_copper"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash.Copper">
             <intent-filter>
@@ -175,7 +175,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_graphite"
-            android:label="@string/app_name"
+            android:label="Nuvio Offline"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nuvio.Splash.Graphite">
             <intent-filter>
