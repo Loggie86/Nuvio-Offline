@@ -56,6 +56,17 @@ android {
     compileSdkMinor = libs.versions.android.compileSdkMinor.get().toInt()
 
     signingConfigs {
+        // Use the cached CI key explicitly: Android Gradle's default debug key path
+        // can differ from the location restored by the Actions cache.
+        getByName("debug") {
+            val stableKey = System.getenv("NUVIO_OFFLINE_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }
+            if (stableKey != null) {
+                storeFile = file(stableKey)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         create("release") {
             if (releaseKeystore != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {
                 storeFile = releaseKeystore
