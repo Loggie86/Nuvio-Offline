@@ -83,7 +83,7 @@ jobs:
           echo 'CI keystore certificate:'
           keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep 'SHA256:'
           ./gradlew :androidApp:assembleFullDebug --no-daemon --stacktrace
-          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --print-certs androidApp/build/outputs/apk/full/debug/*.apk | grep 'Signer #1 certificate SHA-256 digest'
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --print-certs androidApp/build/outputs/apk/full/debug/*.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
