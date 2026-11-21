@@ -3,6 +3,11 @@ package com.nuvio.app.features.streams
 import kotlinx.serialization.json.JsonObject
 
 internal expect object StreamBadgeSettingsStorage {
+    fun loadOfflineWifiOnly(): Boolean?
+    fun saveOfflineWifiOnly(value: Boolean)
+    fun loadOfflineExcludedSsids(): String?
+    fun saveOfflineExcludedSsids(value: String)
+
     fun loadOfflineMaxHeight(): Int?
     fun saveOfflineMaxHeight(value: Int)
     fun loadOfflineMaxSizeGb(): Int?

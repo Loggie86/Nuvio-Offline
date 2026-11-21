@@ -20,7 +20,12 @@ internal actual object DownloadsPlatformDownloader {
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     fun initialize(context: Context) {
+        OfflineWifiPlatform.initialize(context)
         scheduler(context)
+    }
+
+    fun refreshNetworkRules() {
+        downloadScheduler?.rescheduleActiveForNetworkChange()
     }
 
     @Synchronized

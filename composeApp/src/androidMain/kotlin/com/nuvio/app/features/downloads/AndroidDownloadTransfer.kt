@@ -29,6 +29,7 @@ internal suspend fun transferAndroidDownload(
     validator: String?,
     client: OkHttpClient = downloadHttpClient,
     onHeaders: (totalBytes: Long?, validator: String?) -> Unit,
+    networkCheck: () -> Unit = {},
     onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
 ): File = coroutineScope {
     val activeCall = AtomicReference<Call?>()
@@ -42,6 +43,7 @@ internal suspend fun transferAndroidDownload(
 
             while (true) {
                 ensureActive()
+                networkCheck()
                 val request = Request.Builder().url(item.sourceUrl).apply {
                     item.sourceHeaders.forEach { (key, value) ->
                         if (!key.equals("Range", true) && !key.equals("If-Range", true) &&
@@ -82,6 +84,7 @@ internal suspend fun transferAndroidDownload(
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
                                 ensureActive()
+                                networkCheck()
                                 val size = input.read(buffer)
                                 if (size == -1) break
                                 output.write(buffer, 0, size)

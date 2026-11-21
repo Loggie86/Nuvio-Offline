@@ -12,6 +12,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 actual object StreamBadgeSettingsStorage {
+    actual fun loadOfflineWifiOnly(): Boolean? = preferences?.let { p -> p.getBoolean(ProfileScopedKey.of("offline_wifi_only"), true) }
+    actual fun saveOfflineWifiOnly(value: Boolean) { preferences?.edit()?.putBoolean(ProfileScopedKey.of("offline_wifi_only"), value)?.apply() }
+    actual fun loadOfflineExcludedSsids(): String? = loadString("offline_excluded_ssids")
+    actual fun saveOfflineExcludedSsids(value: String) = saveString("offline_excluded_ssids", value)
+
     actual fun loadOfflineMaxHeight(): Int? = preferences?.getInt(ProfileScopedKey.of("offline_max_height"), 0)?.takeIf { it != 0 }
     actual fun saveOfflineMaxHeight(value: Int) { preferences?.edit()?.putInt(ProfileScopedKey.of("offline_max_height"), value)?.apply() }
     actual fun loadOfflineMaxSizeGb(): Int? = preferences?.getInt(ProfileScopedKey.of("offline_max_size_gb"), -1)?.takeIf { it >= 0 }

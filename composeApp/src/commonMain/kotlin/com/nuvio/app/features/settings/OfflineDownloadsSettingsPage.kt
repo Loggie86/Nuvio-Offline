@@ -4,8 +4,16 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Modifier
+import com.nuvio.app.features.downloads.OfflineNetworkSettings
+import com.nuvio.app.features.downloads.OfflineWifiNetworkPicker
 import com.nuvio.app.features.downloads.OfflineQualityPolicy
 
 internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
@@ -13,6 +21,15 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
         OfflineQualityPolicy.ensureLoaded()
         var resolution by remember { mutableIntStateOf(OfflineQualityPolicy.maxHeight) }
         var sizeGb by remember { mutableIntStateOf(OfflineQualityPolicy.maxSizeGb) }
+        OfflineNetworkSettings.ensureLoaded()
+        var wifiOnly by remember { mutableStateOf(OfflineNetworkSettings.wifiOnly) }
+        var blocked by remember { mutableStateOf(OfflineNetworkSettings.excludedSsids) }
+        var networkName by remember { mutableStateOf("") }
+        fun blockNetwork(name: String) {
+            OfflineNetworkSettings.addExcludedSsid(name)
+            blocked = OfflineNetworkSettings.excludedSsids
+            networkName = ""
+        }
         SettingsSection(title = "Offline downloads", isTablet = isTablet) {
             SettingsGroup(isTablet = isTablet) {
                 SettingsNavigationRow(
@@ -47,6 +64,48 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                     isTablet = isTablet,
                     onClick = {},
                 )
+            }
+        }
+        SettingsSection(title = "Download network restrictions", isTablet = isTablet) {
+            SettingsGroup(isTablet = isTablet) {
+                SettingsSwitchRow(
+                    title = "Wi-Fi only",
+                    description = "Never download over mobile data (recommended)",
+                    checked = wifiOnly,
+                    isTablet = isTablet,
+                    onCheckedChange = {
+                        wifiOnly = it
+                        OfflineNetworkSettings.setWifiOnly(it)
+                    },
+                )
+                OfflineWifiNetworkPicker(onAdd = ::blockNetwork)
+                OutlinedTextField(
+                    value = networkName,
+                    onValueChange = { networkName = it },
+                    label = { Text("Wi-Fi name (SSID) to block") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(enabled = networkName.isNotBlank(), onClick = { blockNetwork(networkName) }) {
+                    Text("Add blocked network")
+                }
+                if (blocked.isEmpty()) {
+                    Text("No excluded Wi-Fi networks")
+                } else {
+                    Text("Excluded networks — tap to remove:")
+                    blocked.sorted().forEach { ssid ->
+                        SettingsNavigationRow(
+                            title = ssid,
+                            description = "Blocked from offline downloads • tap to allow",
+                            isTablet = isTablet,
+                            onClick = {
+                                OfflineNetworkSettings.removeExcludedSsid(ssid)
+                                blocked = OfflineNetworkSettings.excludedSsids
+                            },
+                        )
+                    }
+                }
+                Text("Allow location access and turn on Location to identify your Wi-Fi. If the name cannot be read, downloads stay blocked whenever exclusions exist.")
             }
         }
     }

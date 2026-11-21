@@ -5,6 +5,8 @@ import android.app.job.JobScheduler
 import android.content.ComponentName
 import android.content.Context
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.PersistableBundle
 import android.os.SystemClock
@@ -53,7 +55,9 @@ internal class AndroidDownloadScheduler(val context: Context) {
             } else {
                 val work = OneTimeWorkRequestBuilder<DownloadsTransferWorker>()
                     .setInputData(workDataOf(FILE_NAME to item.fileName, GENERATION to transfer.generation))
-                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(
+                        if (OfflineNetworkSettings.apply { ensureLoaded() }.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+                    ).build())
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                     .build()
                 val operation = WorkManager.getInstance(context).enqueueUniqueWork(
@@ -78,7 +82,15 @@ internal class AndroidDownloadScheduler(val context: Context) {
     internal fun buildJob(transfer: AndroidDownloadTransfer): JobInfo =
         JobInfo.Builder(transfer.jobId, ComponentName(context, DownloadsTransferJobService::class.java))
             .setUserInitiated(true)
-            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .apply {
+                OfflineNetworkSettings.ensureLoaded()
+                if (OfflineNetworkSettings.wifiOnly) {
+                    setRequiredNetwork(NetworkRequest.Builder()
+                        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build())
+                } else {
+                    setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                }
+            }
             .setPersisted(true)
             .setEstimatedNetworkBytes(transfer.item.totalBytes ?: JobInfo.NETWORK_BYTES_UNKNOWN.toLong(), 0L)
             .setBackoffCriteria(30_000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
@@ -91,6 +103,18 @@ internal class AndroidDownloadScheduler(val context: Context) {
     @RequiresApi(34)
     private fun jobScheduler(): JobScheduler =
         context.getSystemService(JobScheduler::class.java).forNamespace(JOB_NAMESPACE)
+
+    fun rescheduleActiveForNetworkChange() {
+        store.transfers.value.values.filter { it.item.status == DownloadStatus.Downloading }.forEach { transfer ->
+            cancelScheduled(transfer)
+            if (Build.VERSION.SDK_INT >= 34) {
+                runCatching { jobScheduler().schedule(buildJob(transfer)) }
+                    .onFailure { fail(transfer, it as? Exception ?: IOException(it.message)) }
+            } else {
+                enqueue(transfer.item)
+            }
+        }
+    }
 
     fun restore(item: DownloadItem): DownloadItem {
         var transfer = store.get(item.fileName)?.takeIf { it.item.id == item.id }
@@ -151,6 +175,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 .build()
         } else downloadHttpClient
         try {
+            OfflineWifiPlatform.requireAllowed(context, network)
             DownloadSubtitles.prepare(transfer.item, destination.toURI().toString())
             currentCoroutineContext().ensureActive()
             if (!isActive(transfer)) return@withLock false
@@ -163,6 +188,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 onHeaders = { total, validator ->
                     updateActive(transfer) { it.copy(validator = validator, item = it.item.copy(totalBytes = total)) }
                 },
+                networkCheck = { OfflineWifiPlatform.requireAllowed(context, network) },
                 onProgress = { bytes, total ->
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastProgressAt >= 1_000L || bytes == total) {
@@ -193,8 +219,9 @@ internal class AndroidDownloadScheduler(val context: Context) {
         } catch (error: Exception) {
             currentCoroutineContext().ensureActive()
             if (!isActive(transfer)) return@withLock false
-            val retry = shouldRetryAndroidDownload(error, transfer.retryCount)
-            if (retry) updateActive(transfer) { it.copy(retryCount = it.retryCount + 1) }
+            val restricted = error is OfflineWifiRestricted
+            val retry = restricted || shouldRetryAndroidDownload(error, transfer.retryCount)
+            if (retry && !restricted) updateActive(transfer) { it.copy(retryCount = it.retryCount + 1) }
             else fail(transfer, error)
             retry
         } finally {
