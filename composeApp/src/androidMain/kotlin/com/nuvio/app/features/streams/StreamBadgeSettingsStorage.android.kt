@@ -12,6 +12,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 actual object StreamBadgeSettingsStorage {
+    actual fun loadOfflineMaxHeight(): Int? = preferences?.getInt(ProfileScopedKey.of("offline_max_height"), 0)?.takeIf { it != 0 }
+    actual fun saveOfflineMaxHeight(value: Int) { preferences?.edit()?.putInt(ProfileScopedKey.of("offline_max_height"), value)?.apply() }
+    actual fun loadOfflineMaxSizeGb(): Int? = preferences?.getInt(ProfileScopedKey.of("offline_max_size_gb"), -1)?.takeIf { it >= 0 }
+    actual fun saveOfflineMaxSizeGb(value: Int) { preferences?.edit()?.putInt(ProfileScopedKey.of("offline_max_size_gb"), value)?.apply() }
+
     private const val preferencesName = "nuvio_stream_badge_settings"
     private const val legacyDebridPreferencesName = "nuvio_debrid_settings"
     private const val streamBadgeRulesKey = "stream_badge_rules"
