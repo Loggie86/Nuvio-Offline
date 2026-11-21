@@ -268,19 +268,20 @@ fun DetailActions(
             onClick = onClick,
         )
     }
+    val downloadAction = onDownloadClick?.let { click ->
+        DetailSecondaryAction(
+            label = "Download best offline version",
+            icon = Icons.Default.Download,
+            onClick = click,
+        )
+    }
     DetailActionButtons(
         playLabel = if (playEnabled) playLabel else stringResource(Res.string.playback_unavailable),
         playEnabled = playEnabled,
-        pinnedAction = shuffleAction?.takeIf { shuffleEnabled },
+        pinnedAction = shuffleAction?.takeIf { shuffleEnabled } ?: downloadAction,
         secondaryActions = buildList {
             if (!shuffleEnabled) shuffleAction?.let(::add)
-            if (onDownloadClick != null) add(
-                DetailSecondaryAction(
-                    label = "Download best offline version",
-                    icon = Icons.Default.Download,
-                    onClick = onDownloadClick,
-                ),
-            )
+            if (shuffleEnabled) downloadAction?.let(::add)
             add(
                 DetailSecondaryAction(
                     label = stringResource(if (isWatched) Res.string.hero_mark_unwatched else Res.string.hero_mark_watched),
