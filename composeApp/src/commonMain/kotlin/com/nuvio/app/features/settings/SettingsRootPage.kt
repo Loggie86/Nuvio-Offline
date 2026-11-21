@@ -3,6 +3,7 @@ package com.nuvio.app.features.settings
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.runtime.Composable
 import nuvio.composeapp.generated.resources.*
@@ -80,7 +81,8 @@ internal fun LazyListScope.settingsRootContent(
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsNavigationRow(
                             title = "Downloads",
-                            description = "Offline quality, 4K exclusion and file-size limits",
+                            description = "Offline quality, Wi-Fi limits and Smart Downloads",
+                            icon = Icons.Default.Download,
                             isTablet = isTablet,
                             onClick = { onPageClick(SettingsPage.Downloads) },
                         )

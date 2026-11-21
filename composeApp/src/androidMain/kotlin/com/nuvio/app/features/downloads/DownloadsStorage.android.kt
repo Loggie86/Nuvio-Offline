@@ -14,6 +14,9 @@ internal actual object DownloadsStorage {
         preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
     }
 
+    actual fun loadSmartPayload(): String? = preferences?.getString(ProfileScopedKey.of("smart_downloads_v1"), null)
+    actual fun saveSmartPayload(payload: String) { preferences?.edit()?.putString(ProfileScopedKey.of("smart_downloads_v1"), payload)?.apply() }
+
     actual fun loadPayload(): String? =
         preferences?.getString(ProfileScopedKey.of(payloadKey), null)
 

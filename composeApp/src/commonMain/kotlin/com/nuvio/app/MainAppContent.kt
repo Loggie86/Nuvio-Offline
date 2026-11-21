@@ -340,6 +340,7 @@ internal fun MainAppContent(
     val fullyWatchedSeriesKeys by WatchedRepository.fullyWatchedSeriesKeys.collectAsStateWithLifecycle()
     val completedDownloads by remember {
         DownloadsRepository.ensureLoaded()
+        com.nuvio.app.features.downloads.SmartDownloadsRepository.ensureStarted()
         DownloadsRepository.uiState
     }.collectMappedAsState { it.completedItems }
     val networkCondition by NetworkStatusRepository.uiState.collectMappedAsState { it.condition }

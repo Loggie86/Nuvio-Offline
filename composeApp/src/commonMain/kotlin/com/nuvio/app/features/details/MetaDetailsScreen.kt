@@ -134,6 +134,7 @@ import com.nuvio.app.features.library.TrackingMembershipRemovalConfirmationHost
 import com.nuvio.app.features.library.executeTrackingMembershipOperation
 import com.nuvio.app.features.library.showTrackingMembershipRewriteFeedback
 import com.nuvio.app.features.library.toLibraryItem
+import com.nuvio.app.features.downloads.SmartDownloadsRepository
 import com.nuvio.app.features.downloads.OfflineAutoDownload
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.shuffle.EpisodeShuffleRepository
@@ -213,6 +214,13 @@ fun MetaDetailsScreen(
     val uiState by MetaDetailsRepository.uiState.collectAsStateWithLifecycle()
     val displayedMeta = uiState.meta?.takeIf { it.type == type && it.id == id }
         ?: MetaDetailsRepository.peek(type, id)
+    val smartDownloadState by remember {
+        SmartDownloadsRepository.ensureLoaded()
+        SmartDownloadsRepository.state
+    }.collectAsStateWithLifecycle()
+    LaunchedEffect(displayedMeta) {
+        displayedMeta?.takeIf { it.type == "series" }?.let(SmartDownloadsRepository::updateSeries)
+    }
     val metaScreenSettingsUiState by remember {
         MetaScreenSettingsRepository.ensureLoaded()
         MetaScreenSettingsRepository.uiState
@@ -1214,6 +1222,10 @@ fun MetaDetailsScreen(
                                                             shuffleEnabled = shuffleSettings.enabled,
                                                             onPlayClick = onPrimaryPlayClick,
                                                             onDownloadClick = onPrimaryDownloadClick,
+                    onSmartDownloadsClick = onPrimarySmartDownloadsClick,
+                    smartDownloadsEnabled = smartDownloadsEnabled,
+                                                            onSmartDownloadsClick = if (meta.type == "series") { { SmartDownloadsRepository.toggleSeries(meta) } } else null,
+                                                            smartDownloadsEnabled = smartDownloadState.followed.any { it.id == meta.id },
                                                             onPlayLongClick = if (showManualPlayOption) onPrimaryPlayLongClick else null,
                                                             onShuffleClick = onShuffleClick,
                                                             onWatchedClick = toggleWatched,
@@ -1268,6 +1280,10 @@ fun MetaDetailsScreen(
                                         isWatched = isWatched,
                                         onPrimaryPlayClick = onPrimaryPlayClick,
                                         onPrimaryDownloadClick = onPrimaryDownloadClick,
+                    onPrimarySmartDownloadsClick = onPrimarySmartDownloadsClick,
+                    smartDownloadsEnabled = smartDownloadsEnabled,
+                                        onPrimarySmartDownloadsClick = if (meta.type == "series") { { SmartDownloadsRepository.toggleSeries(meta) } } else null,
+                                        smartDownloadsEnabled = smartDownloadState.followed.any { it.id == meta.id },
                                         onShuffleClick = onShuffleClick,
                                         shuffleEnabled = shuffleSettings.enabled,
                                         onPrimaryPlayLongClick = onPrimaryPlayLongClick,
@@ -2008,6 +2024,8 @@ private fun LazyListScope.configuredMetaSectionItems(
     isWatched: Boolean,
     onPrimaryPlayClick: () -> Unit,
     onPrimaryDownloadClick: () -> Unit,
+    onPrimarySmartDownloadsClick: (() -> Unit)?,
+    smartDownloadsEnabled: Boolean,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,
@@ -2324,6 +2342,8 @@ private fun ConfiguredMetaSections(
     isWatched: Boolean,
     onPrimaryPlayClick: () -> Unit,
     onPrimaryDownloadClick: () -> Unit,
+    onPrimarySmartDownloadsClick: (() -> Unit)?,
+    smartDownloadsEnabled: Boolean,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,

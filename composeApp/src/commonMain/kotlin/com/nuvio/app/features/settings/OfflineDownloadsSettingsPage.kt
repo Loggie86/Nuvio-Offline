@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import com.nuvio.app.features.downloads.OfflineNetworkSettings
 import com.nuvio.app.features.downloads.OfflineWifiNetworkPicker
 import com.nuvio.app.features.downloads.OfflineQualityPolicy
+import com.nuvio.app.features.downloads.SmartDownloadsRepository
 
 internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
     item(key = "offline-download-rules") {
@@ -22,6 +23,9 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
         var resolution by remember { mutableIntStateOf(OfflineQualityPolicy.maxHeight) }
         var sizeGb by remember { mutableIntStateOf(OfflineQualityPolicy.maxSizeGb) }
         OfflineNetworkSettings.ensureLoaded()
+        SmartDownloadsRepository.ensureLoaded()
+        var smartTarget by remember { mutableIntStateOf(SmartDownloadsRepository.state.value.target) }
+        var deleteWatched by remember { mutableStateOf(SmartDownloadsRepository.state.value.autoDeleteWatched) }
         var wifiOnly by remember { mutableStateOf(OfflineNetworkSettings.wifiOnly) }
         var blocked by remember { mutableStateOf(OfflineNetworkSettings.excludedSsids) }
         var networkName by remember { mutableStateOf("") }
@@ -64,6 +68,30 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                     isTablet = isTablet,
                     onClick = {},
                 )
+            }
+        }
+        SettingsSection(title = "Smart Downloads · TV series", isTablet = isTablet) {
+            SettingsGroup(isTablet = isTablet) {
+                SettingsNavigationRow(
+                    title = "Keep next unwatched episodes",
+                    description = "Next $smartTarget episodes · tap for 3, 5 or 10",
+                    isTablet = isTablet,
+                    onClick = {
+                        smartTarget = when (smartTarget) { 3 -> 5; 5 -> 10; else -> 3 }
+                        SmartDownloadsRepository.setTarget(smartTarget)
+                    },
+                )
+                SettingsSwitchRow(
+                    title = "Auto-delete watched episodes",
+                    description = "Remove local downloads when an episode is marked watched",
+                    checked = deleteWatched,
+                    isTablet = isTablet,
+                    onCheckedChange = {
+                        deleteWatched = it
+                        SmartDownloadsRepository.setAutoDeleteWatched(it)
+                    },
+                )
+                Text("Enable Smart Downloads for individual series from their detail pages. Downloads replenish while Nuvio Offline is running; transfers continue in the background.")
             }
         }
         SettingsSection(title = "Download network restrictions", isTablet = isTablet) {

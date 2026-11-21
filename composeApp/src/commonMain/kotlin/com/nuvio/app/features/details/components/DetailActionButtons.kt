@@ -262,6 +262,8 @@ fun DetailActions(
     onSaveClick: () -> Unit,
     onSaveLongClick: (() -> Unit)?,
     onDownloadClick: (() -> Unit)? = null,
+    onSmartDownloadsClick: (() -> Unit)? = null,
+    smartDownloadsEnabled: Boolean = false,
 ) {
     val shuffleAction = onShuffleClick?.let { onClick ->
         DetailSecondaryAction(
@@ -302,6 +304,16 @@ fun DetailActions(
         onPlayClick = onPlayClick,
         onPlayLongClick = onPlayLongClick,
     )
+    if (onSmartDownloadsClick != null) {
+        OutlinedButton(
+            onClick = onSmartDownloadsClick,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        ) {
+            Icon(imageVector = Icons.Default.Download, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(if (smartDownloadsEnabled) "Smart Downloads · On (tap to stop)" else "Smart Downloads · Follow series")
+        }
+    }
     if (onDownloadClick != null) {
         OutlinedButton(
             onClick = onDownloadClick,

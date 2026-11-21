@@ -33,6 +33,7 @@ object DownloadsRepository {
 
     fun onProfileChanged() {
         loadFromDisk()
+        SmartDownloadsRepository.onProfileChanged()
     }
 
     fun markCompletedSeen() {
