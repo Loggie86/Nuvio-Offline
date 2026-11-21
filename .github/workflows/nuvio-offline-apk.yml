@@ -56,6 +56,26 @@ jobs:
           if [[ -n "$TMDB_API_KEY" ]]; then
             printf 'TMDB_API_KEY=%s\n' "$TMDB_API_KEY" >> local.properties
           fi
+      - name: Restore stable Android signing identity
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: nuvio-offline-android-debug-signing-v1
+      - name: Prepare stable debug key
+        env:
+          KEYSTORE_B64: ${{ secrets.NUVIO_OFFLINE_SIGNING_KEYSTORE_B64 }}
+        run: |
+          mkdir -p "$HOME/.android"
+          if [[ -n "$KEYSTORE_B64" ]]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
+          elif [[ ! -f "$HOME/.android/debug.keystore" ]]; then
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname 'CN=Nuvio Offline,O=Logan Home,C=AU'
+          fi
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey | grep 'SHA256:' >> "$GITHUB_STEP_SUMMARY"
       - name: Build installable Android APK
         run: ./gradlew :androidApp:assembleFullDebug --no-daemon --stacktrace
       - name: Upload APK
