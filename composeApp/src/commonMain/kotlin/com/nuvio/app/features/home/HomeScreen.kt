@@ -934,11 +934,32 @@ fun HomeScreen(
         }
     }
     val hasRenderableHomeRows = homeUiState.sections.isNotEmpty() || hasRenderableCollectionRows
+    // A fresh install can restore Continue Watching before any catalog hero source.
+    // Prefer artwork from that history rather than reserving a blank black hero.
+    val heroDisplayItems = remember(homeUiState.heroItems, continueWatchingItems) {
+        homeUiState.heroItems.ifEmpty {
+            continueWatchingItems.asSequence()
+                .filter { !it.background.isNullOrBlank() || !it.poster.isNullOrBlank() }
+                .distinctBy { it.parentMetaId }
+                .take(6)
+                .map { item ->
+                    MetaPreview(
+                        id = item.parentMetaId,
+                        type = item.parentMetaType,
+                        name = item.title,
+                        poster = item.poster ?: item.imageUrl,
+                        banner = item.background ?: item.imageUrl,
+                        logo = item.logo,
+                        landscapePoster = item.background ?: item.imageUrl,
+                    )
+                }.toList()
+        }
+    }
     val showHeroSlot = shouldShowHomeHeroSlot(
         heroEnabled = homeSettingsUiState.heroEnabled,
-        hasHeroItems = homeUiState.heroItems.isNotEmpty(),
+        hasHeroItems = heroDisplayItems.isNotEmpty(),
         isResolvingHeroSources = isResolvingHeroSources,
-        hasRenderableHomeRows = hasRenderableHomeRows,
+        hasRenderableHomeRows = hasRenderableHomeRows && isResolvingHeroSources,
     )
     MaintainHomeScrollPosition(
         listState = homeListState,
@@ -946,7 +967,7 @@ fun HomeScreen(
         showHeroSlot = showHeroSlot,
     )
     val showHeroSkeleton = showHeroSlot &&
-        homeUiState.heroItems.isEmpty() &&
+        heroDisplayItems.isEmpty() &&
         isResolvingHeroSources
     val isInitialHomeContentLoading = shouldShowInitialHomeLoading(
         hasRenderableHomeRows = hasRenderableHomeRows,
@@ -1003,7 +1024,7 @@ fun HomeScreen(
         ) {
             if (showHeroSlot) {
                 item(key = "home_hero", contentType = "hero") {
-                    val homeHeroState = rememberHomeHeroState(homeUiState.heroItems)
+                    val homeHeroState = rememberHomeHeroState(heroDisplayItems)
                     Crossfade(
                         targetState = showHeroSkeleton,
                         modifier = Modifier.nuvioHorizontalScrollBleed(LocalVerticalBarPadding.current),
@@ -1017,7 +1038,7 @@ fun HomeScreen(
                                 mobileBelowSectionHeightHint = mobileHeroBelowSectionHeightHint,
                             )
 
-                            homeUiState.heroItems.isNotEmpty() -> HomeHeroSection(
+                            heroDisplayItems.isNotEmpty() -> HomeHeroSection(
                                 items = homeHeroState.items,
                                 modifier = Modifier,
                                 viewportHeight = maxHeight,

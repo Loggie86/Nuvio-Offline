@@ -264,6 +264,7 @@ fun DetailActions(
     onDownloadClick: (() -> Unit)? = null,
     onSmartDownloadsClick: (() -> Unit)? = null,
     smartDownloadsEnabled: Boolean = false,
+    smartDownloadsError: String? = null,
 ) {
     val shuffleAction = onShuffleClick?.let { onClick ->
         DetailSecondaryAction(
@@ -313,6 +314,13 @@ fun DetailActions(
             Spacer(modifier = Modifier.width(8.dp))
             Text(if (smartDownloadsEnabled) "Smart Downloads · On (tap to stop)" else "Smart Downloads · Follow series")
         }
+    }
+    if (smartDownloadsEnabled && !smartDownloadsError.isNullOrBlank()) {
+        Text(
+            text = "Smart Downloads: $smartDownloadsError",
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
     if (onDownloadClick != null) {
         OutlinedButton(

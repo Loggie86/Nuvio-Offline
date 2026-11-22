@@ -218,6 +218,7 @@ fun MetaDetailsScreen(
         SmartDownloadsRepository.ensureLoaded()
         SmartDownloadsRepository.state
     }.collectAsStateWithLifecycle()
+    val smartDownloadErrors by SmartDownloadsRepository.errors.collectAsStateWithLifecycle()
     LaunchedEffect(displayedMeta) {
         displayedMeta?.takeIf { it.type == "series" }?.let(SmartDownloadsRepository::updateSeries)
     }
@@ -1225,6 +1226,7 @@ fun MetaDetailsScreen(
                                                             onDownloadClick = onPrimaryDownloadClick,
                                                             onSmartDownloadsClick = if (meta.type == "series") { { SmartDownloadsRepository.toggleSeries(meta) } } else null,
                                                             smartDownloadsEnabled = smartDownloadState.followed.any { it.id == meta.id },
+                                                            smartDownloadsError = smartDownloadErrors[meta.id],
                                                             onPlayLongClick = if (showManualPlayOption) onPrimaryPlayLongClick else null,
                                                             onShuffleClick = onShuffleClick,
                                                             onWatchedClick = toggleWatched,
@@ -1281,6 +1283,7 @@ fun MetaDetailsScreen(
                                         onPrimaryDownloadClick = onPrimaryDownloadClick,
                                         onPrimarySmartDownloadsClick = if (meta.type == "series") { { SmartDownloadsRepository.toggleSeries(meta) } } else null,
                                         smartDownloadsEnabled = smartDownloadState.followed.any { it.id == meta.id },
+                                        smartDownloadsError = smartDownloadErrors[meta.id],
                                         onShuffleClick = onShuffleClick,
                                         shuffleEnabled = shuffleSettings.enabled,
                                         onPrimaryPlayLongClick = onPrimaryPlayLongClick,
@@ -2023,6 +2026,7 @@ private fun LazyListScope.configuredMetaSectionItems(
     onPrimaryDownloadClick: () -> Unit,
     onPrimarySmartDownloadsClick: (() -> Unit)?,
     smartDownloadsEnabled: Boolean,
+    smartDownloadsError: String?,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,
@@ -2111,6 +2115,7 @@ private fun LazyListScope.configuredMetaSectionItems(
                     onPrimaryDownloadClick = onPrimaryDownloadClick,
                     onPrimarySmartDownloadsClick = onPrimarySmartDownloadsClick,
                     smartDownloadsEnabled = smartDownloadsEnabled,
+                    smartDownloadsError = smartDownloadsError,
                     onShuffleClick = onShuffleClick,
                     shuffleEnabled = shuffleEnabled,
                     onPrimaryPlayLongClick = onPrimaryPlayLongClick,
@@ -2343,6 +2348,7 @@ private fun ConfiguredMetaSections(
     onPrimaryDownloadClick: () -> Unit,
     onPrimarySmartDownloadsClick: (() -> Unit)?,
     smartDownloadsEnabled: Boolean,
+    smartDownloadsError: String?,
     onShuffleClick: (() -> Unit)?,
     shuffleEnabled: Boolean,
     onPrimaryPlayLongClick: (() -> Unit)?,
@@ -2416,6 +2422,7 @@ private fun ConfiguredMetaSections(
                     onDownloadClick = onPrimaryDownloadClick,
                     onSmartDownloadsClick = onPrimarySmartDownloadsClick,
                     smartDownloadsEnabled = smartDownloadsEnabled,
+                    smartDownloadsError = smartDownloadsError,
                     onPlayLongClick = if (showManualPlayOption) onPrimaryPlayLongClick else null,
                     onShuffleClick = onShuffleClick,
                     onWatchedClick = onWatchedClick,

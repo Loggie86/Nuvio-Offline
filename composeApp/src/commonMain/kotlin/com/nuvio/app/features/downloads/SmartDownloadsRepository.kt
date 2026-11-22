@@ -61,6 +61,8 @@ internal object SmartDownloadsRepository {
     private var loaded = false
     private var observing = false
     private val lastUnsuccessfulAttempt = mutableMapOf<String, Long>()
+    private val mutableErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val errors: StateFlow<Map<String, String>> = mutableErrors.asStateFlow()
 
     fun ensureLoaded() {
         if (loaded) return
@@ -71,6 +73,8 @@ internal object SmartDownloadsRepository {
     }
 
     fun onProfileChanged() {
+        mutableErrors.value = emptyMap()
+        lastUnsuccessfulAttempt.clear()
         loaded = false
         ensureLoaded()
     }
@@ -100,6 +104,7 @@ internal object SmartDownloadsRepository {
         ensureLoaded()
         val existing = mutable.value.followed
         if (existing.any { it.id == meta.id }) {
+            mutableErrors.value = mutableErrors.value - meta.id
             save(mutable.value.copy(followed = existing.filterNot { it.id == meta.id }))
         } else {
             val episodes = meta.releasedPlayableEpisodes(CurrentDateProvider.todayIsoDate()).filter { it.season != null && it.episode != null && it.available && (it.season ?: 0) > 0 }
@@ -108,6 +113,9 @@ internal object SmartDownloadsRepository {
             save(mutable.value.copy(followed = existing + SmartSeries(
                 meta.id, meta.name, meta.poster, meta.logo, meta.background, episodes,
             )))
+            if (episodes.isEmpty()) {
+                mutableErrors.value = mutableErrors.value + (meta.id to "No released episode details available")
+            }
         }
     }
 
@@ -122,6 +130,12 @@ internal object SmartDownloadsRepository {
                 poster = meta.poster, logo = meta.logo, background = meta.background) else series
         }
         if (revised != mutable.value.followed) save(mutable.value.copy(followed = revised))
+    }
+
+    fun retrySeries(seriesId: String) {
+        lastUnsuccessfulAttempt.keys.filter { it.startsWith("$seriesId|") }.forEach(lastUnsuccessfulAttempt::remove)
+        mutableErrors.value = mutableErrors.value - seriesId
+        scope.launch { runCatching { reconcile() } }
     }
 
     fun ensureStarted() {
@@ -163,6 +177,9 @@ internal object SmartDownloadsRepository {
                     .forEach { DownloadsRepository.cancelDownload(it.id) }
             }
             val upcoming = series.episodes.filterNot { isWatched(series, it) }.take(settings.target)
+            if (upcoming.isEmpty()) {
+                mutableErrors.value = mutableErrors.value + (series.id to "No unwatched released episodes found")
+            }
             // Fill the requested target now; don't depend on another show being added
             // to trigger the next episode. Failed searches use a cooldown to prevent loops.
             for (episode in upcoming) {
@@ -174,17 +191,23 @@ internal object SmartDownloadsRepository {
                 val key = "${series.id}|${episode.season}|${episode.episode}"
                 val now = DownloadsClock.nowEpochMs()
                 if (now - (lastUnsuccessfulAttempt[key] ?: 0L) < 10 * 60 * 1000L) continue
-                val result = OfflineAutoDownload.enqueue(
+                val result = runCatching { OfflineAutoDownload.enqueue(
                     type = "series", videoId = episode.id, parentMetaId = series.id, parentMetaType = "series",
                     title = series.name, logo = series.logo, poster = series.poster, background = series.background,
                     season = episode.season, episode = episode.episode, episodeTitle = episode.title,
                     episodeThumbnail = episode.thumbnail, durationMinutes = episode.runtimeMinutes,
-                )
+                ) }.getOrElse { error -> error.message ?: "Episode source search failed" }
                 val queued = DownloadsRepository.uiState.value.items.any { item ->
                     item.parentMetaId == series.id && item.seasonNumber == episode.season &&
                         item.episodeNumber == episode.episode && item.status != DownloadStatus.Failed
                 }
-                if (!queued) lastUnsuccessfulAttempt[key] = now else lastUnsuccessfulAttempt.remove(key)
+                if (!queued) {
+                    lastUnsuccessfulAttempt[key] = now
+                    mutableErrors.value = mutableErrors.value + (series.id to "S${episode.season}E${episode.episode}: $result")
+                } else {
+                    lastUnsuccessfulAttempt.remove(key)
+                    mutableErrors.value = mutableErrors.value - series.id
+                }
             }
         }
     }
