@@ -49,33 +49,46 @@ internal class AndroidDownloadScheduler(val context: Context) {
         if (existing && Build.VERSION.SDK_INT >= 34) return transfer
         try {
             if (Build.VERSION.SDK_INT >= 34) {
-                check(jobScheduler().schedule(buildJob(transfer)) == JobScheduler.RESULT_SUCCESS) {
-                    "Android could not start the download. Open the app and try again."
-                }
+                // Android rejects user-initiated jobs started automatically in the
+                // background (e.g. when Smart Downloads advances to the next episode).
+                // Fall back to persistent foreground WorkManager instead of failing.
+                val accepted = runCatching {
+                    jobScheduler().schedule(buildJob(transfer)) == JobScheduler.RESULT_SUCCESS
+                }.getOrDefault(false)
+                if (!accepted) scheduleWithWorkManager(transfer, existing)
             } else {
-                val work = OneTimeWorkRequestBuilder<DownloadsTransferWorker>()
-                    .setInputData(workDataOf(FILE_NAME to item.fileName, GENERATION to transfer.generation))
-                    .setConstraints(Constraints.Builder().setRequiredNetworkType(
-                        if (OfflineNetworkSettings.apply { ensureLoaded() }.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
-                    ).build())
-                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                    .build()
-                val operation = WorkManager.getInstance(context).enqueueUniqueWork(
-                    workName(transfer), if (existing) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, work,
-                )
-                operation.result.addListener({
-                    try {
-                        operation.result.get()
-                    } catch (error: Exception) {
-                        fail(transfer, error)
-                        notifyCurrent(item.fileName)
-                    }
-                }, ContextCompat.getMainExecutor(context))
+                scheduleWithWorkManager(transfer, existing)
             }
         } catch (error: Exception) {
             fail(transfer, error)
         }
         return store.get(item.fileName) ?: transfer
+    }
+
+    private fun scheduleWithWorkManager(transfer: AndroidDownloadTransfer, existing: Boolean) {
+        // Persist which scheduler owns this download: restore/cancel must not
+        // mistake a WorkManager transfer for an absent JobScheduler job.
+        store.update(transfer.item.fileName, transfer.generation) {
+            it.copy(scheduledWithWorkManager = true)
+        }
+        val work = OneTimeWorkRequestBuilder<DownloadsTransferWorker>()
+            .setInputData(workDataOf(FILE_NAME to transfer.item.fileName, GENERATION to transfer.generation))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(
+                if (OfflineNetworkSettings.apply { ensureLoaded() }.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            ).build())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
+        val operation = WorkManager.getInstance(context).enqueueUniqueWork(
+            workName(transfer), if (existing) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, work,
+        )
+        operation.result.addListener({
+            try {
+                operation.result.get()
+            } catch (error: Exception) {
+                fail(transfer, error)
+                notifyCurrent(transfer.item.fileName)
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     @RequiresApi(34)
@@ -107,11 +120,14 @@ internal class AndroidDownloadScheduler(val context: Context) {
     fun rescheduleActiveForNetworkChange() {
         store.transfers.value.values.filter { it.item.status == DownloadStatus.Downloading }.forEach { transfer ->
             cancelScheduled(transfer)
-            if (Build.VERSION.SDK_INT >= 34) {
-                runCatching { jobScheduler().schedule(buildJob(transfer)) }
-                    .onFailure { fail(transfer, it as? Exception ?: IOException(it.message)) }
+            if (transfer.scheduledWithWorkManager) {
+                scheduleWithWorkManager(transfer, existing = false)
+            } else if (Build.VERSION.SDK_INT >= 34) {
+                val scheduled = runCatching { jobScheduler().schedule(buildJob(transfer)) == JobScheduler.RESULT_SUCCESS }
+                    .getOrDefault(false)
+                if (!scheduled) scheduleWithWorkManager(transfer, existing = false)
             } else {
-                enqueue(transfer.item)
+                scheduleWithWorkManager(transfer, existing = false)
             }
         }
     }
@@ -122,7 +138,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 item.copy(status = DownloadStatus.Paused, errorMessage = null)
             } else item
         if (transfer.item.status == DownloadStatus.Downloading && Build.VERSION.SDK_INT >= 34 &&
-            jobScheduler().getPendingJob(transfer.jobId) == null) {
+            !transfer.scheduledWithWorkManager && jobScheduler().getPendingJob(transfer.jobId) == null) {
             pause(item.fileName)
             transfer = store.get(item.fileName) ?: transfer
         }
@@ -156,7 +172,8 @@ internal class AndroidDownloadScheduler(val context: Context) {
 
     private fun cancelScheduled(transfer: AndroidDownloadTransfer) {
         if (Build.VERSION.SDK_INT >= 34) jobScheduler().cancel(transfer.jobId)
-        else WorkManager.getInstance(context).cancelUniqueWork(workName(transfer))
+        // Always cancel possible WorkManager fallback, even on Android 14+.
+        WorkManager.getInstance(context).cancelUniqueWork(workName(transfer))
     }
 
     suspend fun execute(

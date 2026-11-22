@@ -17,6 +17,7 @@ internal data class AndroidDownloadTransfer(
     val generation: String,
     val validator: String? = null,
     val retryCount: Int = 0,
+    val scheduledWithWorkManager: Boolean = false,
 )
 
 internal class AndroidDownloadStore(private val directory: File) {
