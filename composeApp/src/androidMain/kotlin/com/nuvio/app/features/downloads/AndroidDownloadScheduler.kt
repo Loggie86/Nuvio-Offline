@@ -46,18 +46,13 @@ internal class AndroidDownloadScheduler(val context: Context) {
         val previous = store.get(item.fileName)
         val transfer = store.begin(item)
         val existing = previous?.generation == transfer.generation
-        if (existing && Build.VERSION.SDK_INT >= 34) return transfer
         try {
-            if (Build.VERSION.SDK_INT >= 34) {
-                // Android rejects user-initiated jobs started automatically in the
-                // background (e.g. when Smart Downloads advances to the next episode).
-                // Fall back to persistent foreground WorkManager instead of failing.
-                val accepted = runCatching {
-                    jobScheduler().schedule(buildJob(transfer)) == JobScheduler.RESULT_SUCCESS
-                }.getOrDefault(false)
-                if (!accepted) scheduleWithWorkManager(transfer, existing)
-            } else {
-                scheduleWithWorkManager(transfer, existing)
+            // Smart Downloads are initiated by an automatic queue, not direct user
+            // interaction. UIDT can be accepted but indefinitely deferred by Android;
+            // foreground WorkManager is appropriate for this persistent work.
+            if (!existing || !transfer.scheduledWithWorkManager) {
+                if (Build.VERSION.SDK_INT >= 34) jobScheduler().cancel(transfer.jobId)
+                scheduleWithWorkManager(transfer, existing = false)
             }
         } catch (error: Exception) {
             fail(transfer, error)
@@ -120,15 +115,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
     fun rescheduleActiveForNetworkChange() {
         store.transfers.value.values.filter { it.item.status == DownloadStatus.Downloading }.forEach { transfer ->
             cancelScheduled(transfer)
-            if (transfer.scheduledWithWorkManager) {
-                scheduleWithWorkManager(transfer, existing = false)
-            } else if (Build.VERSION.SDK_INT >= 34) {
-                val scheduled = runCatching { jobScheduler().schedule(buildJob(transfer)) == JobScheduler.RESULT_SUCCESS }
-                    .getOrDefault(false)
-                if (!scheduled) scheduleWithWorkManager(transfer, existing = false)
-            } else {
-                scheduleWithWorkManager(transfer, existing = false)
-            }
+            scheduleWithWorkManager(transfer, existing = false)
         }
     }
 
@@ -137,9 +124,12 @@ internal class AndroidDownloadScheduler(val context: Context) {
             ?: return if (item.status == DownloadStatus.Downloading) {
                 item.copy(status = DownloadStatus.Paused, errorMessage = null)
             } else item
-        if (transfer.item.status == DownloadStatus.Downloading && Build.VERSION.SDK_INT >= 34 &&
-            !transfer.scheduledWithWorkManager && jobScheduler().getPendingJob(transfer.jobId) == null) {
-            pause(item.fileName)
+        if (transfer.item.status == DownloadStatus.Downloading && !transfer.scheduledWithWorkManager) {
+            // Upgrade existing UIDT jobs on the same device without discarding
+            // queued downloads or any partial file already received.
+            if (Build.VERSION.SDK_INT >= 34) jobScheduler().cancel(transfer.jobId)
+            runCatching { scheduleWithWorkManager(transfer, existing = false) }
+                .onFailure { fail(transfer, it as? Exception ?: IOException(it.message)) }
             transfer = store.get(item.fileName) ?: transfer
         }
         return transfer.item
