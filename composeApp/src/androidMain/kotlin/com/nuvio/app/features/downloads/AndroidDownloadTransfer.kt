@@ -81,16 +81,24 @@ internal suspend fun transferAndroidDownload(
                     onProgress(downloaded, totalBytes)
                     body.byteStream().use { input ->
                         FileOutputStream(partial, resumed && offset > 0L).use { output ->
-                            val buffer = ByteArray(64 * 1024)
+                            val buffer = ByteArray(256 * 1024)
+                            var lastNetworkCheck = System.nanoTime()
                             while (true) {
                                 ensureActive()
-                                networkCheck()
+                                // Avoid repeated Android connectivity/SSID Binder calls for
+                                // every socket read, while still enforcing network rules.
+                                val now = System.nanoTime()
+                                if (now - lastNetworkCheck >= TimeUnit.MILLISECONDS.toNanos(250)) {
+                                    networkCheck()
+                                    lastNetworkCheck = now
+                                }
                                 val size = input.read(buffer)
                                 if (size == -1) break
                                 output.write(buffer, 0, size)
                                 downloaded += size
                                 onProgress(downloaded, totalBytes)
                             }
+                            networkCheck()
                             output.fd.sync()
                         }
                     }

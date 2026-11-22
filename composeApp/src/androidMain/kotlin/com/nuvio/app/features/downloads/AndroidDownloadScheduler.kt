@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.ConnectionPool
 
 internal class AndroidDownloadScheduler(val context: Context) {
@@ -186,10 +187,10 @@ internal class AndroidDownloadScheduler(val context: Context) {
         } else downloadHttpClient
         try {
             OfflineWifiPlatform.requireAllowed(context, network)
-            DownloadSubtitles.prepare(transfer.item, destination.toURI().toString())
             currentCoroutineContext().ensureActive()
             if (!isActive(transfer)) return@withLock false
             var lastProgressAt = 0L
+            var lastPublishedBytes = -1L
             val partial = if (destination.isFile) destination else transferAndroidDownload(
                 item = transfer.item,
                 directory = directory,
@@ -207,14 +208,28 @@ internal class AndroidDownloadScheduler(val context: Context) {
                         throw IOException("Download exceeded the duration-based size limit")
                     }
                     val now = SystemClock.elapsedRealtime()
-                    if (now - lastProgressAt >= 1_000L || bytes == total) {
+                    if (lastPublishedBytes < 0L || (lastPublishedBytes == 0L && bytes > 0L) ||
+                        now - lastProgressAt >= 500L || bytes == total) {
                         lastProgressAt = now
+                        lastPublishedBytes = bytes
                         updateActive(transfer) {
                             it.copy(item = it.item.copy(downloadedBytes = bytes, totalBytes = total))
                         }?.let(onProgress)
                     }
                 },
             )
+            currentCoroutineContext().ensureActive()
+            // Video is the priority. Optional subtitle servers must not delay
+            // the start of the transfer or indefinitely block the queue.
+            try {
+                withTimeoutOrNull(20_000L) {
+                    DownloadSubtitles.prepare(transfer.item, destination.toURI().toString())
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Embedded subtitles and any already saved tracks remain usable.
+            }
             currentCoroutineContext().ensureActive()
             updateActive(transfer) { current ->
                 if (partial != destination && !partial.renameTo(destination)) {

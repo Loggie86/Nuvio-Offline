@@ -26,6 +26,21 @@ class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun reportsIntermediateProgressBeforeCompletion(): Unit = runBlocking {
+        MockWebServer().use { server ->
+            val body = "x".repeat(128 * 1024)
+            server.enqueue(MockResponse().setBody(body).throttleBody(16 * 1024, 100, TimeUnit.MILLISECONDS))
+            val progress = mutableListOf<Long>()
+            val output = transferAndroidDownload(downloadItem(server.url("/video").toString()), temporary.newFolder(),
+                null, onHeaders = { total, _ -> assertEquals(body.length.toLong(), total) },
+                onProgress = { bytes, _ -> progress.add(bytes) })
+            assertEquals(body.length.toLong(), output.length())
+            assertTrue(progress.any { it > 0 && it < output.length() })
+            assertEquals(output.length(), progress.last())
+        }
+    }
+
+    @Test
     fun resumesPartialFileWithRangeAndValidator(): Unit = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 5-10/11")
