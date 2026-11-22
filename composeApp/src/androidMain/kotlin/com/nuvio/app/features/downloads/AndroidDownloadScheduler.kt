@@ -69,7 +69,10 @@ internal class AndroidDownloadScheduler(val context: Context) {
         val work = OneTimeWorkRequestBuilder<DownloadsTransferWorker>()
             .setInputData(workDataOf(FILE_NAME to transfer.item.fileName, GENERATION to transfer.generation))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(
-                if (OfflineNetworkSettings.apply { ensureLoaded() }.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+                // Android may classify the Tailscale VPN as metered even over Wi-Fi.
+                // Always schedule on CONNECTED and enforce Wi-Fi/SSID rules ourselves
+                // immediately before and during byte transfer.
+                NetworkType.CONNECTED
             ).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
