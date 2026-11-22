@@ -19,11 +19,24 @@ class DownloadsTransferWorker(context: Context, parameters: WorkerParameters) : 
         DownloadsLiveStatusPlatform.initialize(applicationContext)
         try {
             if (AppFeaturePolicy.downloadForegroundServiceEnabled) {
-                setForeground(ForegroundInfo(
-                    DownloadsLiveStatusPlatform.notificationId(transfer.item.id),
-                    DownloadsLiveStatusPlatform.buildNotification(applicationContext, transfer.item),
-                    if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
-                ))
+                // Auto-queued episodes can start with the app in the background.
+                // On Android 12+ foreground-service promotion is not always allowed.
+                // It is optional for WorkManager execution: continue as normal
+                // constrained work rather than fail all Smart Downloads at 0 B.
+                try {
+                    setForeground(ForegroundInfo(
+                        DownloadsLiveStatusPlatform.notificationId(transfer.item.id),
+                        DownloadsLiveStatusPlatform.buildNotification(applicationContext, transfer.item),
+                        if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
+                    ))
+                } catch (error: android.app.ForegroundServiceStartNotAllowedException) {
+                    // WorkManager still owns this job; the system may impose its
+                    // usual background execution time limit. Partial bytes persist.
+                } catch (error: IllegalStateException) {
+                    // Some devices wrap the foreground-service start restriction.
+                    // Only skip promotion when Android explicitly rejected it.
+                    if (error.message?.contains("startForegroundService() not allowed", ignoreCase = true) != true) throw error
+                }
             }
             val retry = scheduler.execute(transfer) { DownloadsLiveStatusPlatform.notifyTransfer(it.item) }
             scheduler.notifyCurrent(fileName)
