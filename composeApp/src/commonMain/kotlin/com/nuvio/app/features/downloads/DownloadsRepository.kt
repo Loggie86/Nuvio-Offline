@@ -367,7 +367,10 @@ object DownloadsRepository {
                     DownloadsPlatformDownloader.removePartialFile(recovered.fileName)
                     recovered.rejectOversizedSource().copy(status = DownloadStatus.Queued, errorMessage = null, downloadedBytes = 0L, totalBytes = null)
                 } else recovered
-                val localUriNormalized = normalizeCompletedLocalFileUri(sizeRecovered)
+                val searchRecovered = if (sizeRecovered.smartDownload && sizeRecovered.status == DownloadStatus.Failed &&
+                    sizeRecovered.errorMessage == "No eligible download source found. Tap retry.")
+                    sizeRecovered.copy(status = DownloadStatus.Queued, errorMessage = null) else sizeRecovered
+                val localUriNormalized = normalizeCompletedLocalFileUri(searchRecovered)
                 if (localUriNormalized != item) {
                     shouldPersistNormalized = true
                 }
@@ -411,19 +414,20 @@ object DownloadsRepository {
         val job = sourceScope.launch(start = CoroutineStart.LAZY) {
             // A Wi-Fi-blocked queue should not obtain a link that will expire before use.
             while (OfflineWifiPlatform.restrictionLabel() != null) delay(2_000)
-            val stream = try {
+            val result = try {
                 OfflineAutoDownload.freshSource(item)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                null
+                OfflineSourceResult(null, "Source search failed before completion. Tap retry.")
             }
+            val stream = result.stream
             val current = _uiState.value.items.firstOrNull { it.id == item.id && it.status == DownloadStatus.Downloading } ?: return@launch
             activeHandles.remove(item.id)
             val url = stream?.playableDirectUrl
             if (stream == null || url == null) {
                 mutateItem(item.id) { it.copy(status = DownloadStatus.Failed, resolvingSource = false, errorMessage =
-                    if (it.rejectedSizeSources.isNotEmpty()) "No remaining source meets the download size limit. Tap retry." else "No eligible download source found. Tap retry.") }
+                    result.error ?: "No matching sources. Tap retry.") }
                 startNextQueued()
                 return@launch
             }

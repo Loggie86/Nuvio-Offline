@@ -47,22 +47,44 @@ internal object OfflineQualityPolicy {
 
     fun rejectionReason(stream: StreamItem, durationMinutes: Int? = null, isEpisode: Boolean = false): String? {
         ensureLoaded()
-        val label = listOfNotNull(stream.name, stream.title, stream.description, stream.behaviorHints.filename).joinToString(" ").lowercase()
-        if (Regex("""\b(remux|blu[ -]?ray\s*remux|2160p|4k|uhd|4320p|8k)\b""").containsMatchIn(label)) {
+        val raw = stream.clientResolve?.stream?.raw
+        val label = listOfNotNull(stream.name, stream.title, stream.description, stream.behaviorHints.filename,
+            raw?.filename, raw?.torrentName, raw?.parsed?.resolution, raw?.parsed?.quality,
+            stream.clientResolve?.filename, stream.debridCacheStatus?.cachedName).joinToString(" ").lowercase().replace('_', ' ')
+        if (Regex("""\b(remux|blu[ -]?ray\s*remux|2160[pi]?|3840\s*[x×]\s*2160|4k|uhd|4320[pi]?|8k)\b""").containsMatchIn(label)) {
             return "4K, UHD and remux files are excluded from offline downloads."
         }
         val detected = when {
-            Regex("""\b(1080p|1920x1080|fhd|full[ -]?hd)\b""").containsMatchIn(label) -> 1080
-            Regex("""\b(720p|1280x720|hd)\b""").containsMatchIn(label) -> 720
-            Regex("""\b(480p|576p|sd)\b""").containsMatchIn(label) -> 480
+            Regex("""\b(1080\s*[pi]|1920\s*[x×]\s*1080|fhd|full[ -]?hd)\b""").containsMatchIn(label) || raw?.parsed?.resolution?.trim() == "1080" -> 1080
+            Regex("""\b(720\s*[pi]|1280\s*[x×]\s*720|hd)\b""").containsMatchIn(label) || raw?.parsed?.resolution?.trim() == "720" -> 720
+            Regex("""\b(480\s*[pi]|576\s*[pi]|sd)\b""").containsMatchIn(label) -> 480
             else -> null
         }
         if (detected == null) return "Download quality is unknown. Choose a stream labelled 720p or 1080p."
         if (detected > maxHeight) return "Only ${maxHeight}p or lower is permitted for offline downloads."
-        val size = stream.behaviorHints.videoSize
+        val size = reportedDownloadSize(stream)
         if (size != null && size > maxBytes(durationMinutes, isEpisode)) {
             return "This file exceeds your duration-adjusted download size limit."
         }
         return null
     }
+}
+
+/** Prefer structured file sizes; addons often only display a size in their labels. */
+internal fun reportedDownloadSize(stream: StreamItem): Long? {
+    val raw = stream.clientResolve?.stream?.raw
+    listOfNotNull(stream.behaviorHints.videoSize, raw?.size, stream.debridCacheStatus?.cachedSize)
+        .firstOrNull { it > 0L }?.let { return it }
+    val text = listOfNotNull(stream.name, stream.title, stream.description).distinct().joinToString(" ")
+    val values = Regex("""(?i)\b(\d+(?:[.,]\d+)?)\s*(GiB|MiB|GB|MB)\b""").findAll(text).mapNotNull { match ->
+        val number = match.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return@mapNotNull null
+        val multiplier = when (match.groupValues[2].lowercase()) {
+            "gib" -> 1_073_741_824L
+            "mib" -> 1_048_576L
+            "gb" -> 1_000_000_000L
+            else -> 1_000_000L
+        }
+        (number * multiplier).toLong().takeIf { it > 0 }
+    }.distinct().toList()
+    return values.singleOrNull()
 }

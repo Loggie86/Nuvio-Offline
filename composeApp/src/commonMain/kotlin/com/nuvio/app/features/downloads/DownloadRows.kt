@@ -77,6 +77,7 @@ internal fun ActiveDownloadRow(
                 StatusText(
                     text = item.errorMessage ?: stringResource(Res.string.downloads_status_failed),
                     color = tokens.colors.danger,
+                    maxLines = 3,
                 )
             } else {
                 StatusText(text = activeStatusText(item, speedBytesPerSecond))
@@ -310,12 +311,13 @@ private fun MoreActionsButton(onClick: () -> Unit) {
 private fun StatusText(
     text: String,
     color: Color = MaterialTheme.nuvio.colors.textMuted,
+    maxLines: Int = 1,
 ) {
     Text(
         text = text,
         style = MaterialTheme.nuvioTypeScale.bodySm,
         color = color,
-        maxLines = 1,
+        maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
     )
 }

@@ -28,6 +28,15 @@ class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun metadataSizeSupportsTextAndStructuredBytes() {
+        val stream = StreamItem(name = "1080p", description = "WEB-DL • 700 MB", addonName = "Test", addonId = "test")
+        assertEquals(700_000_000L, reportedDownloadSize(stream))
+        assertEquals(1_073_741_824L, reportedDownloadSize(stream.copy(description = "1 GiB")))
+        assertEquals(500L, reportedDownloadSize(stream.copy(behaviorHints = StreamBehaviorHints(videoSize = 500L))))
+        assertNull(reportedDownloadSize(stream.copy(description = "700 MB / 3 GB")))
+    }
+
+    @Test
     fun oversizedSourcesAreExcludedWithoutRetryingTheirTransfer() {
         val oversized = StreamItem(url = "https://example.com/video?token=1", addonName = "Test", addonId = "test",
             behaviorHints = StreamBehaviorHints(filename = "large.mkv"))
