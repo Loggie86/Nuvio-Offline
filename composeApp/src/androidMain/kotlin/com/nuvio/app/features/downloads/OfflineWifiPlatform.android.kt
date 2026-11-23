@@ -39,6 +39,8 @@ internal actual object OfflineWifiPlatform {
     actual fun restrictionLabel(): String? {
         val context = appContext ?: return null
         OfflineNetworkSettings.ensureLoaded()
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        if (manager.activeNetwork == null) return "Waiting for internet connection"
         val wifi = wifiCapabilities(context) != null
         if (!wifi) return if (OfflineNetworkSettings.wifiOnly) "Waiting for Wi-Fi" else null
         if (OfflineNetworkSettings.excludedSsids.isNotEmpty()) {

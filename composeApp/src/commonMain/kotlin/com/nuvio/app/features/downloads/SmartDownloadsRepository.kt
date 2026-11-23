@@ -54,13 +54,13 @@ internal data class SmartDownloadState(
 /** Keeps the next N unwatched episodes queued for series explicitly followed by the user. */
 internal object SmartDownloadsRepository {
     private val json = Json { ignoreUnknownKeys = true }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // All queue mutations and platform progress callbacks are serialized on Main.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val mutex = Mutex()
     private val mutable = MutableStateFlow(SmartDownloadState())
     val state: StateFlow<SmartDownloadState> = mutable.asStateFlow()
     private var loaded = false
     private var observing = false
-    private val lastUnsuccessfulAttempt = mutableMapOf<String, Long>()
     private val mutableErrors = MutableStateFlow<Map<String, String>>(emptyMap())
     val errors: StateFlow<Map<String, String>> = mutableErrors.asStateFlow()
 
@@ -74,7 +74,6 @@ internal object SmartDownloadsRepository {
 
     fun onProfileChanged() {
         mutableErrors.value = emptyMap()
-        lastUnsuccessfulAttempt.clear()
         loaded = false
         ensureLoaded()
     }
@@ -133,8 +132,9 @@ internal object SmartDownloadsRepository {
     }
 
     fun retrySeries(seriesId: String) {
-        lastUnsuccessfulAttempt.keys.filter { it.startsWith("$seriesId|") }.forEach(lastUnsuccessfulAttempt::remove)
         mutableErrors.value = mutableErrors.value - seriesId
+        DownloadsRepository.uiState.value.items.filter { it.parentMetaId == seriesId && it.status == DownloadStatus.Failed }
+            .forEach { DownloadsRepository.retryDownload(it.id) }
         scope.launch { runCatching { reconcile() } }
     }
 
@@ -180,35 +180,22 @@ internal object SmartDownloadsRepository {
             if (upcoming.isEmpty()) {
                 mutableErrors.value = mutableErrors.value + (series.id to "No unwatched released episodes found")
             }
-            // Fill the requested target now; don't depend on another show being added
-            // to trigger the next episode. Failed searches use a cooldown to prevent loops.
+            // Queue identities only. Resolve links immediately before each transfer.
+            // Failed items stay visible and retryable instead of creating a retry loop.
             for (episode in upcoming) {
-                val existing = DownloadsRepository.uiState.value.items.any { item ->
+                val existing = DownloadsRepository.uiState.value.items.firstOrNull { item ->
                     item.parentMetaId == series.id && item.seasonNumber == episode.season &&
-                        item.episodeNumber == episode.episode && item.status != DownloadStatus.Failed
+                        item.episodeNumber == episode.episode
                 }
-                if (existing) continue
-                val key = "${series.id}|${episode.season}|${episode.episode}"
-                val now = DownloadsClock.nowEpochMs()
-                if (now - (lastUnsuccessfulAttempt[key] ?: 0L) < 10 * 60 * 1000L) continue
-                val result = runCatching { OfflineAutoDownload.enqueue(
-                    type = "series", videoId = episode.id, parentMetaId = series.id, parentMetaType = "series",
-                    title = series.name, logo = series.logo, poster = series.poster, background = series.background,
-                    season = episode.season, episode = episode.episode, episodeTitle = episode.title,
-                    episodeThumbnail = episode.thumbnail, durationMinutes = episode.runtimeMinutes,
-                ) }.getOrElse { error -> error.message ?: "Episode source search failed" }
-                val queued = DownloadsRepository.uiState.value.items.any { item ->
-                    item.parentMetaId == series.id && item.seasonNumber == episode.season &&
-                        item.episodeNumber == episode.episode && item.status != DownloadStatus.Failed
-                }
-                if (!queued) {
-                    lastUnsuccessfulAttempt[key] = now
-                    mutableErrors.value = mutableErrors.value + (series.id to "S${episode.season}E${episode.episode}: $result")
-                } else {
-                    lastUnsuccessfulAttempt.remove(key)
-                    mutableErrors.value = mutableErrors.value - series.id
-                }
+                if (existing == null) DownloadsRepository.enqueueSmartEpisode(series, episode)
             }
+            val failed = DownloadsRepository.uiState.value.items.firstOrNull { item ->
+                item.parentMetaId == series.id && item.status == DownloadStatus.Failed &&
+                    upcoming.any { it.season == item.seasonNumber && it.episode == item.episodeNumber }
+            }
+            if (failed != null) mutableErrors.value = mutableErrors.value + (series.id to
+                "S${failed.seasonNumber}E${failed.episodeNumber}: ${failed.errorMessage ?: "Download failed"}")
+            else if (upcoming.isNotEmpty()) mutableErrors.value = mutableErrors.value - series.id
         }
     }
 }

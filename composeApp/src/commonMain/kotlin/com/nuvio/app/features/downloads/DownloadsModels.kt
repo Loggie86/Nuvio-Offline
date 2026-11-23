@@ -53,6 +53,9 @@ data class DownloadItem(
     val errorMessage: String? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
+    val smartDownload: Boolean = false,
+    val sourceRefreshAttempts: Int = 0,
+    val resolvingSource: Boolean = false,
 ) {
     val isEpisode: Boolean
         get() = seasonNumber != null && episodeNumber != null

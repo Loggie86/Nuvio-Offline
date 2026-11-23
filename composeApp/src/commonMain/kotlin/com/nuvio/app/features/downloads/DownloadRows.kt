@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -328,16 +329,16 @@ private fun activeStatusText(item: DownloadItem, speedBytesPerSecond: Long?): St
         formatBytes(item.downloadedBytes)
     }
     if (item.status == DownloadStatus.Queued) {
-        val position = DownloadsRepository.uiState.value.items.filter { it.status == DownloadStatus.Queued }
-            .sortedWith(compareBy<DownloadItem> { candidate ->
-                DownloadsRepository.uiState.value.items.filter { it.parentMetaId == candidate.parentMetaId }
-                    .minOfOrNull { it.createdAtEpochMs } ?: candidate.createdAtEpochMs
-            }.thenBy { it.seasonNumber ?: Int.MAX_VALUE }.thenBy { it.episodeNumber ?: Int.MAX_VALUE })
+        val state by DownloadsRepository.uiState.collectAsStateWithLifecycle()
+        val position = state.items.filter { it.status == DownloadStatus.Queued }
+            .sortedWith(downloadQueueComparator(state.items))
             .indexOfFirst { it.id == item.id } + 1
         return "Queued · Position #$position"
     }
     if (item.status == DownloadStatus.Downloading && item.downloadedBytes == 0L) {
         OfflineWifiPlatform.restrictionLabel()?.let { return it }
+        if (item.resolvingSource) return "Finding download source…"
+        if (item.totalBytes == null) return "Connecting to download source…"
     }
     if (item.status == DownloadStatus.Paused) {
         return stringResource(Res.string.downloads_status_paused, transferred)
@@ -356,7 +357,7 @@ private fun activeStatusText(item: DownloadItem, speedBytesPerSecond: Long?): St
         return listOf(transferred, speedText).joinToString(DownloadTextSeparator)
     }
     val timeLeft = formatTimeLeft((total - item.downloadedBytes).coerceAtLeast(0L) * 1_000L / speed)
-    return listOf(percent, speedText, timeLeft).joinToString(DownloadTextSeparator)
+    return listOf(percent, transferred, speedText, timeLeft).joinToString(DownloadTextSeparator)
 }
 
 @Composable

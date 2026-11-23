@@ -252,8 +252,9 @@ internal class AndroidDownloadScheduler(val context: Context) {
             if (!isActive(transfer)) return@withLock false
             val restricted = error is OfflineWifiRestricted
             val retry = restricted || shouldRetryAndroidDownload(error, transfer.retryCount)
-            if (retry && !restricted) updateActive(transfer) { it.copy(retryCount = it.retryCount + 1) }
-            else fail(transfer, error)
+            if (retry) {
+                if (!restricted) updateActive(transfer) { it.copy(retryCount = it.retryCount + 1) }
+            } else fail(transfer, error)
             retry
         } finally {
             if (network != null) withContext(NonCancellable + Dispatchers.IO) { client.connectionPool.evictAll() }

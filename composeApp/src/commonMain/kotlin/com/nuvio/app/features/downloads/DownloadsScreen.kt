@@ -465,7 +465,7 @@ private sealed interface DownloadedEntry {
 
 private fun List<DownloadItem>.downloadedEntries(): List<DownloadedEntry> {
     val completed = filter { it.status == DownloadStatus.Completed }
-    val downloadingByShow = filter { it.isEpisode && it.status != DownloadStatus.Completed }
+    val downloadingByShow = filter { it.isEpisode && (it.status == DownloadStatus.Downloading || it.status == DownloadStatus.Queued) }
         .groupingBy { it.parentMetaId }
         .eachCount()
     val movies = completed

@@ -26,6 +26,27 @@ class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun expiredSmartLinksRefreshOnlyOnce() {
+        val item = downloadItem().copy(smartDownload = true)
+        assertTrue(item.shouldRefreshSmartSource("Download failed: HTTP 410"))
+        assertFalse(item.copy(sourceRefreshAttempts = 1).shouldRefreshSmartSource("Download failed: HTTP 410"))
+        assertFalse(item.copy(smartDownload = false).shouldRefreshSmartSource("Download failed: HTTP 410"))
+        assertFalse(item.shouldRefreshSmartSource("Download failed: HTTP 503"))
+    }
+
+    @Test
+    fun queueOrderUsesShowAgeAndEpisodeOrder() {
+        val first = downloadItem(id = "a").copy(parentMetaId = "first", seasonNumber = 1, episodeNumber = 1,
+            status = DownloadStatus.Completed, createdAtEpochMs = 1)
+        val third = first.copy(id = "c", episodeNumber = 3, status = DownloadStatus.Queued, createdAtEpochMs = 3)
+        val second = first.copy(id = "b", episodeNumber = 2, status = DownloadStatus.Queued, createdAtEpochMs = 4)
+        val other = third.copy(id = "d", parentMetaId = "other", createdAtEpochMs = 2)
+        val items = listOf(other, third, first, second)
+        assertEquals(listOf("b", "c", "d"), items.filter { it.status == DownloadStatus.Queued }
+            .sortedWith(downloadQueueComparator(items)).map { it.id })
+    }
+
+    @Test
     fun reportsIntermediateProgressBeforeCompletion(): Unit = runBlocking {
         MockWebServer().use { server ->
             val body = "x".repeat(128 * 1024)

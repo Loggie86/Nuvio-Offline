@@ -4,6 +4,13 @@ import com.nuvio.app.features.player.SubtitleRequestExtras
 import com.nuvio.app.features.player.addonSubtitleRequests
 import com.nuvio.app.features.streams.StreamItem
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +30,7 @@ object DownloadsRepository {
     val hasUnseenCompleted: StateFlow<Boolean> = _hasUnseenCompleted.asStateFlow()
 
     private val activeHandles = mutableMapOf<String, DownloadsTaskHandle>()
+    private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var hasLoaded = false
     private var nextDownloadOrdinal = 0L
 
@@ -32,8 +40,10 @@ object DownloadsRepository {
     }
 
     fun onProfileChanged() {
-        loadFromDisk()
+        activeHandles.values.forEach(DownloadsTaskHandle::cancel)
+        activeHandles.clear()
         SmartDownloadsRepository.onProfileChanged()
+        loadFromDisk()
     }
 
     fun markCompletedSeen() {
@@ -237,6 +247,25 @@ object DownloadsRepository {
         startNextQueued()
     }
 
+    internal fun enqueueSmartEpisode(series: SmartSeries, episode: SmartEpisode) {
+        ensureLoaded()
+        if (_uiState.value.items.any { it.parentMetaId == series.id && it.seasonNumber == episode.season && it.episodeNumber == episode.episode }) return
+        val now = DownloadsClock.nowEpochMs()
+        val id = nextDownloadId(now)
+        val item = DownloadItem(
+            id = id, contentType = "series", parentMetaId = series.id, parentMetaType = "series",
+            videoId = episode.id, title = series.name, logo = series.logo, poster = series.poster,
+            background = series.background, seasonNumber = episode.season, episodeNumber = episode.episode,
+            episodeTitle = episode.title, episodeThumbnail = episode.thumbnail, durationMinutes = episode.runtimeMinutes,
+            streamTitle = "Smart Download", providerName = "", sourceUrl = "",
+            fileName = buildFileName(series.name, episode.season, episode.episode, episode.title, series.name, "", id),
+            status = DownloadStatus.Queued, createdAtEpochMs = now, updatedAtEpochMs = now, smartDownload = true,
+        )
+        publish(_uiState.value.items + item)
+        persist()
+        startNextQueued()
+    }
+
     fun pauseActiveDownloads() {
         ensureLoaded()
         val paused = _uiState.value.items.filter { it.status == DownloadStatus.Downloading || it.status == DownloadStatus.Queued }
@@ -267,6 +296,7 @@ object DownloadsRepository {
             errorMessage = null,
             localFileUri = null,
             updatedAtEpochMs = DownloadsClock.nowEpochMs(),
+            sourceRefreshAttempts = 0,
         )
 
         replaceItem(reset)
@@ -315,9 +345,19 @@ object DownloadsRepository {
         var shouldPersistNormalized = false
         val normalized = DownloadsCodec.decodeItems(payload)
             .map { item ->
-                val statusNormalized = DownloadsPlatformDownloader.restoreItem(item)
+                val migrated = if (item.isEpisode && item.status != DownloadStatus.Completed &&
+                    SmartDownloadsRepository.isFollowing(item.parentMetaId)) item.copy(smartDownload = true) else item
+                val statusNormalized = when {
+                    migrated.status == DownloadStatus.Queued -> migrated
+                    migrated.status == DownloadStatus.Downloading && migrated.resolvingSource -> migrated.copy(status = DownloadStatus.Queued)
+                    migrated.status == DownloadStatus.Failed && migrated.smartDownload && !item.smartDownload ->
+                        migrated.copy(status = DownloadStatus.Queued, errorMessage = null)
+                    else -> DownloadsPlatformDownloader.restoreItem(migrated).copy(smartDownload = migrated.smartDownload)
+                }
 
-                val localUriNormalized = normalizeCompletedLocalFileUri(statusNormalized)
+                val recovered = if (!item.smartDownload && statusNormalized.smartDownload && statusNormalized.status == DownloadStatus.Failed)
+                    statusNormalized.copy(status = DownloadStatus.Queued, errorMessage = null) else statusNormalized
+                val localUriNormalized = normalizeCompletedLocalFileUri(recovered)
                 if (localUriNormalized != item) {
                     shouldPersistNormalized = true
                 }
@@ -327,7 +367,7 @@ object DownloadsRepository {
         // Older builds started every transfer immediately. Pause excess Android jobs,
         // retaining their partial files, before migrating to the ordered queue.
         val oldActive = normalized.filter { it.status == DownloadStatus.Downloading }
-        val allowedActive = oldActive.minWithOrNull(downloadQueueComparator)
+        val allowedActive = oldActive.minWithOrNull(downloadQueueComparator(normalized))
         oldActive.filterNot { it.id == allowedActive?.id }.forEach {
             DownloadsPlatformDownloader.pauseTransfer(it.fileName)
         }
@@ -337,7 +377,7 @@ object DownloadsRepository {
         }
         _uiState.value = DownloadsUiState(sequenced)
         notifyLiveStatusPlatform()
-        if (shouldPersistNormalized) {
+        if (shouldPersistNormalized || sequenced != normalized) {
             persist()
         }
         sequenced.filter { it.status == DownloadStatus.Downloading && it.id !in activeHandles }
@@ -348,11 +388,57 @@ object DownloadsRepository {
     private fun startNextQueued() {
         if (_uiState.value.items.any { it.status == DownloadStatus.Downloading }) return
         val next = _uiState.value.items.filter { it.status == DownloadStatus.Queued }
-            .minWithOrNull(downloadQueueComparator) ?: return
+            .minWithOrNull(downloadQueueComparator(_uiState.value.items)) ?: return
         val active = next.copy(status = DownloadStatus.Downloading, updatedAtEpochMs = DownloadsClock.nowEpochMs())
         replaceItem(active)
         persist()
-        startDownload(active)
+        if (active.smartDownload) resolveSmartSource(active) else startDownload(active)
+    }
+
+    private fun resolveSmartSource(item: DownloadItem) {
+        replaceItem(item.copy(resolvingSource = true))
+        persist()
+        val job = sourceScope.launch(start = CoroutineStart.LAZY) {
+            // A Wi-Fi-blocked queue should not obtain a link that will expire before use.
+            while (OfflineWifiPlatform.restrictionLabel() != null) delay(2_000)
+            val stream = try {
+                OfflineAutoDownload.freshSource(item)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val current = _uiState.value.items.firstOrNull { it.id == item.id && it.status == DownloadStatus.Downloading } ?: return@launch
+            activeHandles.remove(item.id)
+            val url = stream?.playableDirectUrl
+            if (stream == null || url == null) {
+                mutateItem(item.id) { it.copy(status = DownloadStatus.Failed, resolvingSource = false, errorMessage = "No eligible download source found. Tap retry.") }
+                startNextQueued()
+                return@launch
+            }
+            // Different source URLs can represent different encodes. Never append bytes from one to another.
+            val changedSource = current.sourceUrl != url || current.sourceHeaders != sanitizeRequestHeaders(stream.behaviorHints.proxyHeaders?.request)
+            val fileName = if (changedSource) buildFileName(current.title, current.seasonNumber, current.episodeNumber,
+                current.episodeTitle, stream.streamLabel, url, nextDownloadId(DownloadsClock.nowEpochMs())) else current.fileName
+            val ready = current.copy(
+                sourceUrl = url, streamTitle = stream.streamLabel, streamSubtitle = stream.streamSubtitle,
+                providerName = stream.addonName, providerAddonId = stream.addonId,
+                sourceHeaders = sanitizeRequestHeaders(stream.behaviorHints.proxyHeaders?.request),
+                sourceResponseHeaders = sanitizeResponseHeaders(stream.behaviorHints.proxyHeaders?.response),
+                sourceSubtitles = stream.externalSubtitles,
+                subtitleRequests = addonSubtitleRequests(current.contentType, current.videoId, SubtitleRequestExtras.from(stream.behaviorHints, url)),
+                fileName = fileName, downloadedBytes = if (changedSource) 0L else current.downloadedBytes,
+                totalBytes = if (changedSource) null else current.totalBytes,
+                updatedAtEpochMs = DownloadsClock.nowEpochMs(),
+                resolvingSource = false,
+            )
+            if (changedSource) DownloadsPlatformDownloader.removePartialFile(current.fileName)
+            replaceItem(ready)
+            persist()
+            startDownload(ready)
+        }
+        activeHandles[item.id] = object : DownloadsTaskHandle { override fun cancel() { job.cancel() } }
+        job.start()
     }
 
     private fun startDownload(item: DownloadItem) {
@@ -395,18 +481,22 @@ object DownloadsRepository {
             },
             onFailure = { message ->
                 activeHandles.remove(item.id)
-                mutateItem(item.id) { current ->
-                    if (current.status != DownloadStatus.Downloading) {
-                        current
-                    } else {
-                        current.copy(
-                            status = DownloadStatus.Failed,
-                            errorMessage = message.ifBlank { runBlocking { getString(Res.string.download_failed) } },
-                            updatedAtEpochMs = DownloadsClock.nowEpochMs(),
-                        )
+                val current = _uiState.value.items.firstOrNull { it.id == item.id }
+                if (current != null && current.shouldRefreshSmartSource(message)) {
+                    val refresh = current.copy(sourceRefreshAttempts = current.sourceRefreshAttempts + 1, errorMessage = null)
+                    replaceItem(refresh)
+                    persist()
+                    resolveSmartSource(refresh)
+                } else {
+                    mutateItem(item.id) { current ->
+                        if (current.status != DownloadStatus.Downloading) current else current.copy(
+                                status = DownloadStatus.Failed,
+                                errorMessage = message.ifBlank { runBlocking { getString(Res.string.download_failed) } },
+                                updatedAtEpochMs = DownloadsClock.nowEpochMs(),
+                            )
                     }
+                    startNextQueued()
                 }
-                startNextQueued()
             },
             onPaused = {
                 activeHandles.remove(item.id)
@@ -616,7 +706,7 @@ private fun String.fileExtensionFromUrl(): String {
     }
 }
 
-private fun String.isSupportedDownloadUrl(): Boolean {
+internal fun String.isSupportedDownloadUrl(): Boolean {
     val normalized = trim().lowercase()
     if (normalized.startsWith("magnet:")) return false
     if (normalized.endsWith(".m3u8") || normalized.contains(".m3u8?")) return false
@@ -625,12 +715,16 @@ private fun String.isSupportedDownloadUrl(): Boolean {
     return normalized.startsWith("http://") || normalized.startsWith("https://")
 }
 
-private val downloadQueueComparator: Comparator<DownloadItem> =
+internal fun downloadQueueComparator(items: List<DownloadItem>): Comparator<DownloadItem> =
     compareBy<DownloadItem> { candidate ->
         // An earlier-followed show remains ahead of newer shows; manual movies use their own timestamp.
-        DownloadsRepository.uiState.value.items.filter { it.parentMetaId == candidate.parentMetaId }
+        items.filter { it.parentMetaId == candidate.parentMetaId }
             .minOfOrNull { it.createdAtEpochMs } ?: candidate.createdAtEpochMs
     }.thenBy { it.seasonNumber ?: Int.MAX_VALUE }
         .thenBy { it.episodeNumber ?: Int.MAX_VALUE }
         .thenBy { it.createdAtEpochMs }
         .thenBy { it.id }
+
+internal fun DownloadItem.shouldRefreshSmartSource(message: String): Boolean =
+    status == DownloadStatus.Downloading && smartDownload && sourceRefreshAttempts < 1 &&
+        Regex("HTTP (401|403|410)\\b").containsMatchIn(message)
