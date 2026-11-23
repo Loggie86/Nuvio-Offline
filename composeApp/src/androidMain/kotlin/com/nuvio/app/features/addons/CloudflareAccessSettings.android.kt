@@ -13,6 +13,12 @@ import javax.crypto.spec.GCMParameterSpec
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.HttpUrl
+import com.nuvio.app.features.downloads.OfflineWifiPlatform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 internal actual object CloudflareAccessSettings {
     actual val supported = true
@@ -36,6 +42,42 @@ internal actual object CloudflareAccessSettings {
 
     actual fun isConfigured() = credentials != null
     internal fun current(): AccessCredentials? = credentials
+
+    actual fun routingEnabled(): Boolean = preferences?.getBoolean("remote_routing", true) ?: true
+    actual fun setRoutingEnabled(enabled: Boolean) {
+        check(preferences?.edit()?.putBoolean("remote_routing", enabled)?.commit() == true)
+    }
+    actual fun homeSsid(): String = preferences?.getString("home_ssid", "").orEmpty()
+    actual fun setHomeSsid(ssid: String) {
+        check(preferences?.edit()?.putString("home_ssid", ssid.trim())?.commit() == true)
+    }
+    internal fun useRemoteRoute(): Boolean = shouldUseRemoteRoute(routingEnabled(), isConfigured(), homeSsid(), OfflineWifiPlatform.currentSsid())
+    actual fun routeDescription(): String = when {
+        !routingEnabled() -> "Original addon URLs (routing disabled)"
+        !isConfigured() -> "Original addon URLs (no service token)"
+        useRemoteRoute() -> "Remote · authenticated Cloudflare gateway"
+        else -> "Home Wi-Fi · direct local connection"
+    }
+
+    actual suspend fun testConnection(): String = withContext(Dispatchers.IO) {
+        if (credentials == null) return@withContext "No saved service token"
+        try {
+            val request = Request.Builder().url("https://$CLOUDFLARE_ACCESS_HOST/manifest.json").build()
+            val client = AddonHttpClientProvider.get().newBuilder().followRedirects(false).followSslRedirects(false)
+                .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.code in 300..399 || response.code == 401 || response.code == 403 -> "Authentication rejected (HTTP ${response.code}). Check the Service Auth policy."
+                    !response.isSuccessful -> "Gateway returned HTTP ${response.code}. Check the tunnel destination."
+                    else -> {
+                        val manifest = runCatching { Json.parseToJsonElement(response.body?.string().orEmpty()) as? JsonObject }.getOrNull()
+                        if (manifest?.containsKey("id") == true && manifest.containsKey("resources")) "✓ Connected · token accepted and addon manifest loaded"
+                        else "Unexpected gateway response. Check the tunnel destination."
+                    }
+                }
+            }
+        } catch (_: Exception) { "Could not reach the gateway. Check internet connection." }
+    }
 
     @Synchronized actual fun save(clientId: String, clientSecret: String) {
         val id = clientId.trim()
@@ -74,6 +116,25 @@ private const val CLIENT_SECRET = "CF-Access-Client-Secret"
 internal fun Request.isCloudflareAccessOrigin(): Boolean =
     url.isHttps && url.host == CLOUDFLARE_ACCESS_HOST && url.port == 443
 
+internal fun shouldUseRemoteRoute(enabled: Boolean, configured: Boolean, homeSsid: String, currentSsid: String?): Boolean =
+    enabled && configured && (homeSsid.isBlank() || currentSsid != homeSsid)
+
+/** Remap only known services on this user's server. Do not change stored/synced addon URLs. */
+internal fun remapAddonUrl(url: HttpUrl): HttpUrl {
+    if (url.host !in setOf("192.168.4.145", "100.103.120.108", "mint-media.tail6b0186.ts.net")) return url
+    if (url.username.isNotEmpty() || url.password.isNotEmpty()) return url
+    val prefix = when (url.port) {
+        3232 -> "" // The existing tunnel root is AIO Metadata.
+        7780 -> "/plex"
+        1337 -> "/usenet"
+        18100 -> "/torrent"
+        7795 -> "/watchly"
+        else -> return url
+    }
+    return url.newBuilder().scheme("https").host(CLOUDFLARE_ACCESS_HOST).port(443)
+        .encodedPath(prefix + url.encodedPath).build()
+}
+
 /** Apply per network hop, including redirects. Never forward credentials to another origin. */
 internal fun cloudflareAuthenticatedRequest(request: Request, credentials: AccessCredentials?): Request {
     if (request.isCloudflareAccessOrigin() && credentials != null) {
@@ -94,7 +155,9 @@ internal class CloudflareAccessInterceptor : Interceptor {
 
 internal class CloudflareAccessCacheInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
+        val original = chain.request()
+        val routedUrl = if (CloudflareAccessSettings.useRemoteRoute()) remapAddonUrl(original.url) else original.url
+        val request = if (routedUrl != original.url) original.newBuilder().url(routedUrl).removeHeader("Host").build() else original
         return chain.proceed(if (request.isCloudflareAccessOrigin()) request.newBuilder().header("Cache-Control", "no-cache, no-store").build() else request)
     }
 }

@@ -6,10 +6,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +27,9 @@ import com.nuvio.app.features.addons.CloudflareAccessSettings
 import com.nuvio.app.features.addons.CLOUDFLARE_ACCESS_HOST
 import com.nuvio.app.features.addons.AddonRepository
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import com.nuvio.app.features.downloads.OfflineWifiPlatform
 
 internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
     item(key = "offline-download-rules") {
@@ -169,32 +175,75 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
 @Composable
 private fun RemoteAddonAccessSettings(isTablet: Boolean) {
     var configured by remember { mutableStateOf(CloudflareAccessSettings.isConfigured()) }
+    var editing by remember { mutableStateOf(!configured) }
     var clientId by remember { mutableStateOf("") }
     var clientSecret by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
+    var testStatus by remember { mutableStateOf("") }
+    var testing by remember { mutableStateOf(false) }
+    var routing by remember { mutableStateOf(CloudflareAccessSettings.routingEnabled()) }
+    var homeSsid by remember { mutableStateOf(CloudflareAccessSettings.homeSsid()) }
+    var route by remember { mutableStateOf(CloudflareAccessSettings.routeDescription()) }
+    val scope = rememberCoroutineScope()
+    fun testToken() {
+        if (testing) return
+        testing = true
+        scope.launch {
+            try { testStatus = CloudflareAccessSettings.testConnection() }
+            finally { testing = false }
+        }
+    }
+    LaunchedEffect(configured) { if (configured) testToken() }
+    LaunchedEffect(Unit) { while (true) { route = CloudflareAccessSettings.routeDescription(); delay(2_000) } }
     SettingsSection(title = "Remote addon access", isTablet = isTablet) {
         SettingsGroup(isTablet = isTablet) {
             Text("Cloudflare Access · $CLOUDFLARE_ACCESS_HOST", modifier = Modifier.padding(16.dp))
-            Text(if (configured) "Service token saved on this device" else "No service token configured", modifier = Modifier.padding(horizontal = 16.dp))
+            Text(if (configured) "✓ Service token saved securely" else "No service token configured",
+                color = if (configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            if (configured) {
+                TextButton(enabled = !testing, onClick = { testToken() }) { Text(if (testing) "Testing connection…" else "Test saved token") }
+                if (testStatus.isNotBlank()) Text(testStatus, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                TextButton(enabled = !testing, onClick = { editing = !editing; clientId = ""; clientSecret = "" }) { Text(if (editing) "Cancel" else "Replace token") }
+            }
+            if (editing) {
             OutlinedTextField(value = clientId, onValueChange = { clientId = it }, label = { Text("Client ID") },
                 singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             OutlinedTextField(value = clientSecret, onValueChange = { clientSecret = it }, label = { Text("Client secret") },
                 visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            TextButton(enabled = clientId.isNotBlank() && clientSecret.isNotBlank(), onClick = {
+            TextButton(enabled = !testing && clientId.isNotBlank() && clientSecret.isNotBlank(), onClick = {
                 try {
                     CloudflareAccessSettings.save(clientId, clientSecret)
                     configured = true
+                    editing = false
                     clientId = ""
                     clientSecret = ""
                     status = "Saved securely. Enabled addons refreshed."
+                    testStatus = ""
                     AddonRepository.refreshAll()
+                    testToken()
                 } catch (_: Exception) { status = "Could not save service token. Check the values and try again." }
             }) { Text("Save service token") }
-            if (configured) TextButton(onClick = {
-                try { CloudflareAccessSettings.clear(); configured = false; status = "Service token removed." }
+            }
+            if (configured) TextButton(enabled = !testing, onClick = {
+                try { CloudflareAccessSettings.clear(); configured = false; editing = true; testStatus = ""; status = "Service token removed." }
                 catch (_: Exception) { status = "Could not remove token." }
             }) { Text("Remove token") }
             if (status.isNotBlank()) Text(status, modifier = Modifier.padding(16.dp))
+            SettingsSwitchRow(title = "Automatic remote routing", description = "Keep synced addon addresses unchanged; use the secure gateway away from home.",
+                checked = routing, isTablet = isTablet, onCheckedChange = {
+                    try { CloudflareAccessSettings.setRoutingEnabled(it); routing = it; route = CloudflareAccessSettings.routeDescription(); AddonRepository.refreshAll() }
+                    catch (_: Exception) { status = "Could not save routing preference." }
+                })
+            Text(route, modifier = Modifier.padding(16.dp))
+            OutlinedTextField(value = homeSsid, onValueChange = { homeSsid = it }, label = { Text("Trusted home Wi-Fi name") },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            TextButton(onClick = {
+                try { CloudflareAccessSettings.setHomeSsid(homeSsid); route = CloudflareAccessSettings.routeDescription(); AddonRepository.refreshAll(); status = "Home Wi-Fi preference saved." }
+                catch (_: Exception) { status = "Could not save home Wi-Fi." }
+            }) { Text("Save home Wi-Fi") }
+            TextButton(onClick = { OfflineWifiPlatform.currentSsid()?.let { homeSsid = it } }) { Text("Use current Wi-Fi name") }
+            Text("Leave home Wi-Fi blank to always use the gateway. Only set your own home network. Other addons require their gateway routes to be configured.", modifier = Modifier.padding(16.dp))
         }
     }
 }

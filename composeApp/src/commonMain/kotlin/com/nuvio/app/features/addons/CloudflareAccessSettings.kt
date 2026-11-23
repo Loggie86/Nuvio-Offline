@@ -7,4 +7,10 @@ internal expect object CloudflareAccessSettings {
     fun isConfigured(): Boolean
     fun save(clientId: String, clientSecret: String)
     fun clear()
+    fun routingEnabled(): Boolean
+    fun setRoutingEnabled(enabled: Boolean)
+    fun homeSsid(): String
+    fun setHomeSsid(ssid: String)
+    fun routeDescription(): String
+    suspend fun testConnection(): String
 }

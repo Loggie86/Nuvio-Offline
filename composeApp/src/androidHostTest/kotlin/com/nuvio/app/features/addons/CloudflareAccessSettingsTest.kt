@@ -4,8 +4,23 @@ import okhttp3.Request
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class CloudflareAccessSettingsTest {
+    @Test
+    fun localUrlsAreMappedWithoutChangingPathOrQuery() {
+        val original = "http://192.168.4.145:1337/config%2Fexample/manifest.json?value=a%2Fb".toHttpUrl()
+        assertEquals("https://$CLOUDFLARE_ACCESS_HOST/usenet/config%2Fexample/manifest.json?value=a%2Fb", remapAddonUrl(original).toString())
+        assertEquals("https://$CLOUDFLARE_ACCESS_HOST/abc/manifest.json", remapAddonUrl("http://192.168.4.145:3232/abc/manifest.json".toHttpUrl()).toString())
+        val unrelated = "http://192.168.4.145:8123/".toHttpUrl()
+        assertEquals(unrelated, remapAddonUrl(unrelated))
+        assertFalse(shouldUseRemoteRoute(true, true, "Home", "Home"))
+        assertTrue(shouldUseRemoteRoute(true, true, "Home", "Work"))
+        assertTrue(shouldUseRemoteRoute(true, true, "Home", null))
+        assertFalse(shouldUseRemoteRoute(true, false, "Home", "Work"))
+    }
     @Test
     fun serviceTokenOnlyReachesExactHttpsOrigin() {
         val credentials = AccessCredentials("test-client", "test-secret")
