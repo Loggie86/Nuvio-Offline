@@ -110,6 +110,8 @@ private fun buildAddonHttpClient(cache: Cache? = null): OkHttpClient =
         .followRedirects(true)
         .followSslRedirects(true)
         .addInterceptor(NetworkErrorInterceptor())
+        .addInterceptor(CloudflareAccessCacheInterceptor())
+        .addNetworkInterceptor(CloudflareAccessInterceptor())
         .addInterceptor(SentryNetworkBreadcrumbInterceptor())
         .proxy(Proxy.NO_PROXY)
         .apply {

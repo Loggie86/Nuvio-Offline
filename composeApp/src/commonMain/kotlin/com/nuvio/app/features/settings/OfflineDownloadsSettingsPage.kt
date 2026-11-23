@@ -20,6 +20,10 @@ import com.nuvio.app.features.downloads.OfflineNetworkSettings
 import com.nuvio.app.features.downloads.OfflineWifiNetworkPicker
 import com.nuvio.app.features.downloads.OfflineQualityPolicy
 import com.nuvio.app.features.downloads.SmartDownloadsRepository
+import com.nuvio.app.features.addons.CloudflareAccessSettings
+import com.nuvio.app.features.addons.CLOUDFLARE_ACCESS_HOST
+import com.nuvio.app.features.addons.AddonRepository
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
     item(key = "offline-download-rules") {
@@ -154,6 +158,43 @@ internal fun LazyListScope.offlineDownloadsSettingsContent(isTablet: Boolean) {
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                 )
             }
+        }
+        if (CloudflareAccessSettings.supported) {
+            Spacer(modifier = Modifier.height(24.dp))
+            RemoteAddonAccessSettings(isTablet)
+        }
+    }
+}
+
+@Composable
+private fun RemoteAddonAccessSettings(isTablet: Boolean) {
+    var configured by remember { mutableStateOf(CloudflareAccessSettings.isConfigured()) }
+    var clientId by remember { mutableStateOf("") }
+    var clientSecret by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    SettingsSection(title = "Remote addon access", isTablet = isTablet) {
+        SettingsGroup(isTablet = isTablet) {
+            Text("Cloudflare Access · $CLOUDFLARE_ACCESS_HOST", modifier = Modifier.padding(16.dp))
+            Text(if (configured) "Service token saved on this device" else "No service token configured", modifier = Modifier.padding(horizontal = 16.dp))
+            OutlinedTextField(value = clientId, onValueChange = { clientId = it }, label = { Text("Client ID") },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            OutlinedTextField(value = clientSecret, onValueChange = { clientSecret = it }, label = { Text("Client secret") },
+                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            TextButton(enabled = clientId.isNotBlank() && clientSecret.isNotBlank(), onClick = {
+                try {
+                    CloudflareAccessSettings.save(clientId, clientSecret)
+                    configured = true
+                    clientId = ""
+                    clientSecret = ""
+                    status = "Saved securely. Enabled addons refreshed."
+                    AddonRepository.refreshAll()
+                } catch (_: Exception) { status = "Could not save service token. Check the values and try again." }
+            }) { Text("Save service token") }
+            if (configured) TextButton(onClick = {
+                try { CloudflareAccessSettings.clear(); configured = false; status = "Service token removed." }
+                catch (_: Exception) { status = "Could not remove token." }
+            }) { Text("Remove token") }
+            if (status.isNotBlank()) Text(status, modifier = Modifier.padding(16.dp))
         }
     }
 }

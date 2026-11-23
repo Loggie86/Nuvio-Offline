@@ -12,6 +12,8 @@ import kotlinx.coroutines.ensureActive
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.nuvio.app.features.addons.CloudflareAccessCacheInterceptor
+import com.nuvio.app.features.addons.CloudflareAccessInterceptor
 
 internal val downloadHttpClient = OkHttpClient.Builder()
     .connectTimeout(60, TimeUnit.SECONDS)
@@ -19,6 +21,8 @@ internal val downloadHttpClient = OkHttpClient.Builder()
     .writeTimeout(60, TimeUnit.SECONDS)
     .followRedirects(true)
     .followSslRedirects(true)
+    .addInterceptor(CloudflareAccessCacheInterceptor())
+    .addNetworkInterceptor(CloudflareAccessInterceptor())
     .build()
 
 internal class DownloadHttpException(val statusCode: Int) : IOException("Download failed: HTTP $statusCode")

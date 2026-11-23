@@ -26,6 +26,11 @@ import io.ktor.client.engine.okhttp.OkHttp
  */
 class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
+    override fun onCreate() {
+        super.onCreate()
+        com.nuvio.app.features.addons.CloudflareAccessSettings.initialize(this)
+    }
+
     override fun newImageLoader(context: android.content.Context): ImageLoader {
         return ImageLoader.Builder(context)
             .crossfade(true)
