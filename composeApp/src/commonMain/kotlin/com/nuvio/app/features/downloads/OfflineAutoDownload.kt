@@ -52,6 +52,7 @@ internal object OfflineAutoDownload {
         }
         fun isEligible(stream: StreamItem): Boolean =
             stream.playableDirectUrl?.isSupportedDownloadUrl() == true &&
+                !item.hasRejectedSizeSource(stream) &&
                 OfflineQualityPolicy.rejectionReason(stream, item.durationMinutes, item.isEpisode) == null
         val eligible = candidates.filter(::isEligible).ifEmpty { embedded.filter(::isEligible) }
         return eligible.minWithOrNull(compareBy<StreamItem> { item.sourceRefreshAttempts > 0 && it.playableDirectUrl == item.sourceUrl }
@@ -104,3 +105,12 @@ internal object OfflineAutoDownload {
         return result.toastMessage()
     }
 }
+
+// A filename is stable when a provider rotates signed URLs; otherwise use the exact URL.
+internal fun StreamItem.downloadCandidateKey(): String? = behaviorHints.filename
+    ?.trim()?.takeIf { it.isNotEmpty() }
+    ?.let { "file:$addonId:$it" }
+    ?: playableDirectUrl?.let { "url:$it" }
+
+internal fun DownloadItem.hasRejectedSizeSource(stream: StreamItem): Boolean =
+    stream.downloadCandidateKey() in rejectedSizeSources || "url:${stream.playableDirectUrl}" in rejectedSizeSources

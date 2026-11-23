@@ -297,6 +297,8 @@ object DownloadsRepository {
             localFileUri = null,
             updatedAtEpochMs = DownloadsClock.nowEpochMs(),
             sourceRefreshAttempts = 0,
+            sizeFallbackAttempts = 0,
+            rejectedSizeSources = emptyList(),
         )
 
         replaceItem(reset)
@@ -350,14 +352,22 @@ object DownloadsRepository {
                 val statusNormalized = when {
                     migrated.status == DownloadStatus.Queued -> migrated
                     migrated.status == DownloadStatus.Downloading && migrated.resolvingSource -> migrated.copy(status = DownloadStatus.Queued)
-                    migrated.status == DownloadStatus.Failed && migrated.smartDownload && !item.smartDownload ->
+                    migrated.status == DownloadStatus.Failed && migrated.smartDownload && !item.smartDownload && migrated.errorMessage?.isDownloadSizeFailure() != true ->
                         migrated.copy(status = DownloadStatus.Queued, errorMessage = null)
+                    migrated.status == DownloadStatus.Failed -> migrated
                     else -> DownloadsPlatformDownloader.restoreItem(migrated).copy(smartDownload = migrated.smartDownload)
                 }
 
-                val recovered = if (!item.smartDownload && statusNormalized.smartDownload && statusNormalized.status == DownloadStatus.Failed)
+                val recovered = if (!item.smartDownload && statusNormalized.smartDownload && statusNormalized.status == DownloadStatus.Failed &&
+                    statusNormalized.errorMessage?.isDownloadSizeFailure() != true)
                     statusNormalized.copy(status = DownloadStatus.Queued, errorMessage = null) else statusNormalized
-                val localUriNormalized = normalizeCompletedLocalFileUri(recovered)
+                // Recover failures from older builds (or a worker completed while the UI was absent).
+                val sizeRecovered = if (recovered.status == DownloadStatus.Failed && recovered.smartDownload &&
+                    recovered.errorMessage?.isDownloadSizeFailure() == true && (recovered.sizeFallbackAttempts ?: 0) < MAX_SIZE_FALLBACKS) {
+                    DownloadsPlatformDownloader.removePartialFile(recovered.fileName)
+                    recovered.rejectOversizedSource().copy(status = DownloadStatus.Queued, errorMessage = null, downloadedBytes = 0L, totalBytes = null)
+                } else recovered
+                val localUriNormalized = normalizeCompletedLocalFileUri(sizeRecovered)
                 if (localUriNormalized != item) {
                     shouldPersistNormalized = true
                 }
@@ -412,7 +422,8 @@ object DownloadsRepository {
             activeHandles.remove(item.id)
             val url = stream?.playableDirectUrl
             if (stream == null || url == null) {
-                mutateItem(item.id) { it.copy(status = DownloadStatus.Failed, resolvingSource = false, errorMessage = "No eligible download source found. Tap retry.") }
+                mutateItem(item.id) { it.copy(status = DownloadStatus.Failed, resolvingSource = false, errorMessage =
+                    if (it.rejectedSizeSources.isNotEmpty()) "No remaining source meets the download size limit. Tap retry." else "No eligible download source found. Tap retry.") }
                 startNextQueued()
                 return@launch
             }
@@ -431,6 +442,8 @@ object DownloadsRepository {
                 totalBytes = if (changedSource) null else current.totalBytes,
                 updatedAtEpochMs = DownloadsClock.nowEpochMs(),
                 resolvingSource = false,
+                sizeFallbackAttempts = current.sizeFallbackAttempts ?: 0,
+                sourceCandidateKey = stream.downloadCandidateKey(),
             )
             if (changedSource) DownloadsPlatformDownloader.removePartialFile(current.fileName)
             replaceItem(ready)
@@ -482,7 +495,13 @@ object DownloadsRepository {
             onFailure = { message ->
                 activeHandles.remove(item.id)
                 val current = _uiState.value.items.firstOrNull { it.id == item.id }
-                if (current != null && current.shouldRefreshSmartSource(message)) {
+                if (current != null && current.shouldTrySmallerSource(message)) {
+                    DownloadsPlatformDownloader.removePartialFile(current.fileName)
+                    val next = current.rejectOversizedSource().copy(downloadedBytes = 0L, totalBytes = null)
+                    replaceItem(next)
+                    persist()
+                    resolveSmartSource(next)
+                } else if (current != null && current.shouldRefreshSmartSource(message)) {
                     val refresh = current.copy(sourceRefreshAttempts = current.sourceRefreshAttempts + 1, errorMessage = null)
                     replaceItem(refresh)
                     persist()
@@ -728,3 +747,18 @@ internal fun downloadQueueComparator(items: List<DownloadItem>): Comparator<Down
 internal fun DownloadItem.shouldRefreshSmartSource(message: String): Boolean =
     status == DownloadStatus.Downloading && smartDownload && sourceRefreshAttempts < 1 &&
         Regex("HTTP (401|403|410)\\b").containsMatchIn(message)
+
+internal const val MAX_SIZE_FALLBACKS = 5
+
+internal fun String.isDownloadSizeFailure(): Boolean = contains("duration-based", ignoreCase = true) && contains("size limit", ignoreCase = true)
+
+internal fun DownloadItem.shouldTrySmallerSource(message: String): Boolean =
+    smartDownload && status == DownloadStatus.Downloading && (sizeFallbackAttempts ?: 0) < MAX_SIZE_FALLBACKS && message.isDownloadSizeFailure()
+
+internal fun DownloadItem.rejectOversizedSource(): DownloadItem = copy(
+    sizeFallbackAttempts = (sizeFallbackAttempts ?: 0) + 1,
+    rejectedSizeSources = (rejectedSizeSources + listOfNotNull(sourceCandidateKey, sourceUrl.takeIf { it.isNotBlank() }?.let { "url:$it" })).distinct(),
+    sourceRefreshAttempts = 0,
+    errorMessage = null,
+    resolvingSource = true,
+)

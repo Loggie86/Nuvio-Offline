@@ -198,14 +198,14 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 client = client,
                 onHeaders = { total, validator ->
                     if (total != null && total > OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode)) {
-                        throw IOException("File exceeds the duration-based download size limit")
+                        throw DownloadSizeLimitException(total, OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode))
                     }
                     updateActive(transfer) { it.copy(validator = validator, item = it.item.copy(totalBytes = total)) }
                 },
                 networkCheck = { OfflineWifiPlatform.requireAllowed(context, network) },
                 onProgress = { bytes, total ->
                     if (bytes > OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode)) {
-                        throw IOException("Download exceeded the duration-based size limit")
+                        throw DownloadSizeLimitException(bytes, OfflineQualityPolicy.maxBytes(transfer.item.durationMinutes, transfer.item.isEpisode))
                     }
                     val now = SystemClock.elapsedRealtime()
                     if (lastPublishedBytes < 0L || (lastPublishedBytes == 0L && bytes > 0L) ||
@@ -296,7 +296,12 @@ internal class AndroidDownloadScheduler(val context: Context) {
 
 internal fun shouldRetryAndroidDownload(error: Exception, retries: Int): Boolean =
     retries < 4 && when (error) {
+        is DownloadSizeLimitException -> false
         is DownloadHttpException -> error.statusCode == 408 || error.statusCode == 429 || error.statusCode in 500..599
         is IOException -> true
         else -> false
     }
+
+internal class DownloadSizeLimitException(actual: Long, maximum: Long) : IOException(
+    "File exceeds the duration-based download size limit (${actual / 1_048_576} MiB / ${maximum / 1_048_576} MiB)"
+)

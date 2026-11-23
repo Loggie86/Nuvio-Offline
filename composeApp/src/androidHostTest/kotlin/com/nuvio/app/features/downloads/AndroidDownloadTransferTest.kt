@@ -21,9 +21,27 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.nuvio.app.features.streams.StreamItem
+import com.nuvio.app.features.streams.StreamBehaviorHints
 
 class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test
+    fun oversizedSourcesAreExcludedWithoutRetryingTheirTransfer() {
+        val oversized = StreamItem(url = "https://example.com/video?token=1", addonName = "Test", addonId = "test",
+            behaviorHints = StreamBehaviorHints(filename = "large.mkv"))
+        val alternate = oversized.copy(url = "https://example.com/small", behaviorHints = StreamBehaviorHints(filename = "small.mkv"))
+        val current = downloadItem().copy(smartDownload = true, sourceUrl = oversized.playableDirectUrl!!,
+            sourceCandidateKey = oversized.downloadCandidateKey())
+        val failure = DownloadSizeLimitException(2_000_000_000, 1_000_000_000)
+        assertFalse(shouldRetryAndroidDownload(failure, 0))
+        assertTrue(current.shouldTrySmallerSource(failure.message!!))
+        val rejected = current.rejectOversizedSource()
+        assertTrue(rejected.hasRejectedSizeSource(oversized.copy(url = "https://example.com/video?token=2")))
+        assertFalse(rejected.hasRejectedSizeSource(alternate))
+        assertFalse(rejected.copy(sizeFallbackAttempts = MAX_SIZE_FALLBACKS).shouldTrySmallerSource(failure.message!!))
+    }
 
     @Test
     fun expiredSmartLinksRefreshOnlyOnce() {
