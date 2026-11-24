@@ -28,6 +28,19 @@ class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun downloadProviderPriorityPrecedesSize() {
+        fun source(name: String, amount: Long, url: String) = StreamItem(addonName = name, addonId = name,
+            url = url, behaviorHints = StreamBehaviorHints(videoSize = amount))
+        val plex = source("Local Plex Library", 900, "https://example.com/plex")
+        val usenet = source("Usenet Ultimate", 800, "https://example.com/usenet")
+        val torrent = source("Nuvio TorrServer", 100, "https://example.com/torrent")
+        val other = source("Other", 50, "https://example.com/other")
+        assertEquals(listOf(plex, usenet, other, torrent), listOf(torrent, other, usenet, plex).sortedWith(offlineSourceComparator()))
+        assertEquals(usenet, listOf(torrent, usenet).minWithOrNull(offlineSourceComparator()))
+        assertEquals(torrent, listOf(torrent).minWithOrNull(offlineSourceComparator()))
+    }
+
+    @Test
     fun metadataSizeSupportsTextAndStructuredBytes() {
         val stream = StreamItem(name = "1080p", description = "WEB-DL • 700 MB", addonName = "Test", addonId = "test")
         assertEquals(700_000_000L, reportedDownloadSize(stream))

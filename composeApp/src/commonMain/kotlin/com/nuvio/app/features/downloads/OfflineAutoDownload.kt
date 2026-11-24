@@ -88,9 +88,9 @@ internal object OfflineAutoDownload {
             candidates += prepared
         }
         val eligible = candidates.filter(::isEligible)
-        val selected = eligible.minWithOrNull(compareBy<StreamItem> { item.sourceRefreshAttempts > 0 && it.playableDirectUrl == item.sourceUrl }
-            .thenBy { reportedDownloadSize(it) == null }
-            .thenBy { reportedDownloadSize(it) ?: Long.MAX_VALUE })
+        val selected = eligible.minWithOrNull(offlineSourceComparator(
+            failedUrl = item.sourceUrl.takeIf { item.sourceRefreshAttempts > 0 },
+        ))
         return OfflineSourceResult(selected, if (selected == null) sourceFailureSummary(item, candidates, failedProviders, searchCompleted) else null)
     }
 
@@ -122,12 +122,8 @@ internal object OfflineAutoDownload {
         val candidates = loaded.allStreams.filter { stream ->
             stream.playableDirectUrl != null && OfflineQualityPolicy.rejectionReason(stream, durationMinutes, season != null) == null
         }
-        val preferred = candidates.minWithOrNull(
-            compareBy<com.nuvio.app.features.streams.StreamItem> { stream ->
-                // Prefer known, smaller files over unreported sizes.
-                reportedDownloadSize(stream) == null
-            }.thenBy { stream -> reportedDownloadSize(stream) ?: Long.MAX_VALUE }
-        ) ?: return "No downloadable stream meets your quality and size limits."
+        val preferred = candidates.minWithOrNull(offlineSourceComparator())
+            ?: return "No downloadable stream meets your quality and size limits."
 
         val result = DownloadsRepository.enqueueFromStream(
             contentType = type, videoId = videoId, parentMetaId = parentMetaId,
@@ -141,6 +137,24 @@ internal object OfflineAutoDownload {
 }
 
 internal data class OfflineSourceResult(val stream: StreamItem?, val error: String?)
+
+/** Apply provider preference only after the quality/size eligibility filter. */
+internal fun offlineSourceComparator(failedUrl: String? = null): Comparator<StreamItem> =
+    compareBy<StreamItem> { failedUrl != null && it.playableDirectUrl == failedUrl }
+        .thenBy { offlineProviderPriority(it) }
+        .thenBy { reportedDownloadSize(it) == null }
+        .thenBy { reportedDownloadSize(it) ?: Long.MAX_VALUE }
+
+internal fun offlineProviderPriority(stream: StreamItem): Int {
+    val provider = listOfNotNull(stream.addonName, stream.sourceName, stream.addonId.substringBefore(":http"))
+        .joinToString(" ").lowercase().replace(Regex("[^a-z0-9]"), "")
+    return when {
+        "localplexlibrary" in provider || "localplex" in provider -> 0
+        "usenetultimate" in provider -> 1
+        "torrserver" in provider || "p2phttpaddon" in provider || stream.isTorrentStream -> 3
+        else -> 2
+    }
+}
 
 internal fun sourceFailureSummary(item: DownloadItem, candidates: List<StreamItem>, failedProviders: Int, searchCompleted: Boolean): String {
     val direct = candidates.filter { it.playableDirectUrl?.isSupportedDownloadUrl() == true }
