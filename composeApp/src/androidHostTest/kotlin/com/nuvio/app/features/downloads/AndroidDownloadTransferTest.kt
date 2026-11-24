@@ -28,6 +28,41 @@ class AndroidDownloadTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun downloadsSuccessiveBoundedRangesAndPreservesValidator(): Unit = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 0-4/11")
+                .setHeader("ETag", "\"version-1\"").setBody("hello"))
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 5-9/11").setBody(" worl"))
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 10-10/11").setBody("d"))
+            val output = transferAndroidDownload(downloadItem(server.url("/video").toString()), temporary.newFolder(),
+                null, onHeaders = { total, _ -> assertEquals(11L, total) }, onProgress = { _, _ -> }, chunkBytes = 5)
+            assertEquals("hello world", output.readText())
+            assertEquals("bytes=0-4", server.takeRequest().getHeader("Range"))
+            val second = server.takeRequest()
+            assertEquals("bytes=5-9", second.getHeader("Range"))
+            assertEquals("\"version-1\"", second.getHeader("If-Range"))
+            val third = server.takeRequest()
+            assertEquals("bytes=10-14", third.getHeader("Range"))
+            assertEquals("\"version-1\"", third.getHeader("If-Range"))
+        }
+    }
+
+    @Test
+    fun rangeThatIgnoresEndStillUsesOnlyOneChunk(): Unit = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 0-10/11").setBody("hello world"))
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 5-10/11").setBody(" world"))
+            server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 10-10/11").setBody("d"))
+            val output = transferAndroidDownload(downloadItem(server.url("/video").toString()), temporary.newFolder(),
+                null, onHeaders = { _, _ -> }, onProgress = { _, _ -> }, chunkBytes = 5)
+            assertEquals("hello world", output.readText())
+            assertEquals("bytes=0-4", server.takeRequest().getHeader("Range"))
+            assertEquals("bytes=5-9", server.takeRequest().getHeader("Range"))
+            assertEquals("bytes=10-14", server.takeRequest().getHeader("Range"))
+        }
+    }
+
+    @Test
     fun downloadProviderPriorityPrecedesSize() {
         fun source(name: String, amount: Long, url: String) = StreamItem(addonName = name, addonId = name,
             url = url, behaviorHints = StreamBehaviorHints(videoSize = amount))
@@ -114,7 +149,7 @@ class AndroidDownloadTransferTest {
 
             assertEquals("hello world", output.readText())
             val request = server.takeRequest()
-            assertEquals("bytes=5-", request.getHeader("Range"))
+            assertEquals("bytes=5-${5 + DOWNLOAD_RANGE_BYTES - 1}", request.getHeader("Range"))
             assertEquals("\"version-1\"", request.getHeader("If-Range"))
             assertEquals("identity", request.getHeader("Accept-Encoding"))
             assertEquals("Bearer test", request.getHeader("Authorization"))
@@ -143,7 +178,7 @@ class AndroidDownloadTransferTest {
             val output = transferAndroidDownload(downloadItem(server.url("/video").toString()), directory,
                 null, onHeaders = { _, _ -> }, onProgress = { _, _ -> })
             assertEquals("replacement", output.readText())
-            assertEquals("bytes=10-", server.takeRequest().getHeader("Range"))
+            assertEquals("bytes=10-${10 + DOWNLOAD_RANGE_BYTES - 1}", server.takeRequest().getHeader("Range"))
             assertNull(server.takeRequest().getHeader("Range"))
         }
     }

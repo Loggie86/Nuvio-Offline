@@ -26,6 +26,7 @@ internal val downloadHttpClient = OkHttpClient.Builder()
     .build()
 
 internal class DownloadHttpException(val statusCode: Int) : IOException("Download failed: HTTP $statusCode")
+internal const val DOWNLOAD_RANGE_BYTES = 8L * 1024 * 1024
 
 internal suspend fun transferAndroidDownload(
     item: DownloadItem,
@@ -35,6 +36,7 @@ internal suspend fun transferAndroidDownload(
     onHeaders: (totalBytes: Long?, validator: String?) -> Unit,
     networkCheck: () -> Unit = {},
     onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    chunkBytes: Long = DOWNLOAD_RANGE_BYTES,
 ): File = coroutineScope {
     val activeCall = AtomicReference<Call?>()
     val transfer = async(Dispatchers.IO) {
@@ -44,6 +46,10 @@ internal suspend fun transferAndroidDownload(
             val partial = File(directory, "${item.fileName}.part")
             var offset = partial.takeIf(File::isFile)?.length() ?: 0L
             var restarted = false
+            var useRanges = true
+            var currentValidator = validator
+            var expectedTotal = item.totalBytes?.takeIf { offset > 0L && it >= offset }
+            require(chunkBytes > 0L)
 
             while (true) {
                 ensureActive()
@@ -54,33 +60,55 @@ internal suspend fun transferAndroidDownload(
                             !key.equals("Accept-Encoding", true)) header(key, value)
                     }
                     header("Accept-Encoding", "identity")
-                    if (offset > 0L) {
-                        header("Range", "bytes=$offset-")
-                        validator?.let { header("If-Range", it) }
+                    if (useRanges) {
+                        val end = offset + minOf(chunkBytes - 1, Long.MAX_VALUE - offset)
+                        header("Range", "bytes=$offset-$end")
+                        if (offset > 0L) currentValidator?.let { header("If-Range", it) }
                     }
                 }.build()
                 val call = client.newCall(request)
                 activeCall.set(call)
                 ensureActive()
                 call.execute().use { response ->
-                    if (response.code == 416 && offset > 0L && !restarted) {
+                    if (response.code == 416 && useRanges && !restarted) {
+                        val actualTotal = response.header("Content-Range")?.let { Regex("bytes \\*/(\\d+)").matchEntire(it.trim())?.groupValues?.get(1)?.toLongOrNull() }
+                        if (offset > 0L && actualTotal == offset && expectedTotal == offset) return@async partial
                         offset = 0L
                         restarted = true
+                        useRanges = false
+                        currentValidator = null
+                        expectedTotal = null
                         return@use
                     }
                     if (!response.isSuccessful) throw DownloadHttpException(response.code)
                     val range = response.header("Content-Range")?.let(::parseDownloadContentRange)
                     val resumed = response.code == 206
-                    if (resumed && (range == null || range.first != offset)) {
+                    if (resumed && !useRanges) throw IOException("Unexpected partial response to a full download request")
+                    if (resumed && (range == null || range.start != offset)) {
                         throw IOException("Server returned an invalid download range")
                     }
                     val startingBytes = if (resumed) offset else 0L
                     val body = response.body ?: throw IOException("Download response is empty")
                     val contentLength = body.contentLength().takeIf { it >= 0L }
-                    val totalBytes = range?.second ?: contentLength?.let { startingBytes + it }
+                    val totalBytes = if (resumed) range?.total ?: expectedTotal else contentLength
                     val responseValidator = response.header("ETag")?.takeUnless { it.startsWith("W/") }
                         ?: response.header("Last-Modified")
-                    onHeaders(totalBytes, responseValidator)
+                    if (resumed && offset > 0L && expectedTotal != null && range?.total != null && expectedTotal != range.total) {
+                        throw IOException("Download size changed during resume")
+                    }
+                    if (resumed && offset > 0L && currentValidator != null && responseValidator != null && currentValidator != responseValidator) {
+                        throw IOException("Download source changed during resume")
+                    }
+                    currentValidator = responseValidator ?: currentValidator.takeIf { resumed }
+                    expectedTotal = totalBytes
+                    val expectedEnd = if (resumed) checkNotNull(range).end + 1 else totalBytes
+                    if (resumed && contentLength != null && contentLength != expectedEnd!! - startingBytes) {
+                        throw IOException("Server returned an inconsistent download range length")
+                    }
+                    // Some servers honor the range start but ignore its end.
+                    // Consume only a bounded portion on a 206, then close and resume.
+                    val chunkEnd = if (resumed && useRanges) minOf(checkNotNull(expectedEnd), startingBytes + minOf(chunkBytes, Long.MAX_VALUE - startingBytes)) else expectedEnd
+                    onHeaders(totalBytes, currentValidator)
                     var downloaded = startingBytes
                     onProgress(downloaded, totalBytes)
                     body.byteStream().use { input ->
@@ -96,8 +124,13 @@ internal suspend fun transferAndroidDownload(
                                     networkCheck()
                                     lastNetworkCheck = now
                                 }
-                                val size = input.read(buffer)
+                                if (resumed && chunkEnd != null && downloaded == chunkEnd) break
+                                val maxRead = if (resumed && chunkEnd != null) minOf(buffer.size.toLong(), chunkEnd - downloaded).toInt() else buffer.size
+                                val size = input.read(buffer, 0, maxRead)
                                 if (size == -1) break
+                                if (expectedEnd != null && size.toLong() > expectedEnd - downloaded) {
+                                    throw IOException("Server returned more bytes than requested")
+                                }
                                 output.write(buffer, 0, size)
                                 downloaded += size
                                 onProgress(downloaded, totalBytes)
@@ -107,10 +140,13 @@ internal suspend fun transferAndroidDownload(
                         }
                     }
                     ensureActive()
-                    if (totalBytes != null && downloaded != totalBytes) {
+                    if (chunkEnd != null && downloaded != chunkEnd) {
                         throw IOException("Download ended before all bytes were received")
                     }
-                    return@async partial
+                    // A successful bounded range is not the complete file. Continue
+                    // from the exact next byte until the advertised total is reached.
+                    if (!resumed || (totalBytes != null && downloaded == totalBytes)) return@async partial
+                    offset = downloaded
                 }
             }
             @Suppress("UNREACHABLE_CODE")
@@ -128,11 +164,13 @@ internal suspend fun transferAndroidDownload(
     }
 }
 
-internal fun parseDownloadContentRange(value: String): Pair<Long, Long?>? {
+internal data class DownloadContentRange(val start: Long, val end: Long, val total: Long?)
+
+internal fun parseDownloadContentRange(value: String): DownloadContentRange? {
     val match = Regex("bytes (\\d+)-(\\d+)/(\\d+|\\*)").matchEntire(value.trim()) ?: return null
     val start = match.groupValues[1].toLongOrNull() ?: return null
     val end = match.groupValues[2].toLongOrNull() ?: return null
     val total = match.groupValues[3].toLongOrNull()
-    if (end < start || (total != null && end >= total)) return null
-    return start to total
+    if (end < start || end == Long.MAX_VALUE || (total != null && end >= total)) return null
+    return DownloadContentRange(start, end, total)
 }

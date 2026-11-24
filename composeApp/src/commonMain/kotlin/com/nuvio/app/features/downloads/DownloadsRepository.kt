@@ -405,7 +405,10 @@ object DownloadsRepository {
         val active = next.copy(status = DownloadStatus.Downloading, updatedAtEpochMs = DownloadsClock.nowEpochMs())
         replaceItem(active)
         persist()
-        if (active.smartDownload) resolveSmartSource(active) else startDownload(active)
+        // A paused or timed-out transfer with saved bytes should first resume the
+        // same source. Expired links still enter the bounded source-refresh path.
+        val hasResumableSource = active.downloadedBytes > 0L && !active.resolvingSource && active.sourceUrl.isSupportedDownloadUrl()
+        if (active.smartDownload && !hasResumableSource) resolveSmartSource(active) else startDownload(active)
     }
 
     private fun resolveSmartSource(item: DownloadItem) {

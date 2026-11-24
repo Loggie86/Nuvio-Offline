@@ -75,7 +75,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 // immediately before and during byte transfer.
                 NetworkType.CONNECTED
             ).build())
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.SECONDS)
             .build()
         val operation = WorkManager.getInstance(context).enqueueUniqueWork(
             workName(transfer), if (existing) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, work,
@@ -185,6 +185,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 .connectionPool(ConnectionPool())
                 .build()
         } else downloadHttpClient
+        val initialPartialBytes = File(directory, "$fileName.part").takeIf(File::isFile)?.length() ?: 0L
         try {
             OfflineWifiPlatform.requireAllowed(context, network)
             currentCoroutineContext().ensureActive()
@@ -251,9 +252,12 @@ internal class AndroidDownloadScheduler(val context: Context) {
             currentCoroutineContext().ensureActive()
             if (!isActive(transfer)) return@withLock false
             val restricted = error is OfflineWifiRestricted
-            val retry = restricted || shouldRetryAndroidDownload(error, transfer.retryCount)
+            // A connection can repeatedly fail while making useful progress. Only
+            // consecutive attempts with no new bytes should exhaust the retry budget.
+            val madeProgress = (File(directory, "$fileName.part").takeIf(File::isFile)?.length() ?: 0L) > initialPartialBytes
+            val retry = restricted || shouldRetryAndroidDownload(error, if (madeProgress) 0 else transfer.retryCount)
             if (retry) {
-                if (!restricted) updateActive(transfer) { it.copy(retryCount = it.retryCount + 1) }
+                if (!restricted) updateActive(transfer) { it.copy(retryCount = if (madeProgress) 0 else it.retryCount + 1) }
             } else fail(transfer, error)
             retry
         } finally {
